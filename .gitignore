@@ -33,3 +33,16 @@ frontend/.vite/
 
 # Local-only diagrams and reports
 架构图.png
+
+# Real resumes / OCR corpus / eval outputs contain PII and must stay local
+/data/真实简历/
+/backend/benchmark/real_resumes_corpus.json
+/backend/benchmark/real_resumes_golden.json
+/backend/benchmark/real_resumes_eval.json
+/backend/benchmark/real_resumes_report.md
+/backend/benchmark/personal_kb_eval.json
+/backend/benchmark/personal_kb_report.md
+/backend/benchmark/chunking_eval.json
+
+# Root-level local storage (legacy Chroma/runtime data); never commit
+/storage/
