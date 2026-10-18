@@ -14,6 +14,7 @@ from app.models.models import (
     ChunkIndex,
     IndexStats,
     RetrievalLog,
+    User,
 )
 
 __all__ = [
@@ -28,4 +29,5 @@ __all__ = [
     "ChunkIndex",
     "IndexStats",
     "RetrievalLog",
+    "User",
 ]

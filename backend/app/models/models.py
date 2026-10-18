@@ -201,3 +201,18 @@ class BenchmarkRecord(SQLModel, table=True):
     llm_judge_score: float = Field(default=4.5)
     details_json: str = Field(default="[]")
     created_at: datetime = Field(default_factory=utc_now)
+
+
+class User(SQLModel, table=True):
+    """账号模型（W1：鉴权与多租户隔离的最小用户表）"""
+
+    __tablename__ = "users"
+
+    id: str = Field(default_factory=generate_uuid, primary_key=True)
+    student_id: str = Field(unique=True, index=True, max_length=64)
+    email: Optional[str] = Field(default=None, unique=True, index=True, max_length=255)
+    password_hash: str
+    role: str = Field(default="student", max_length=32)
+    status: str = Field(default="active", max_length=32)
+    created_at: datetime = Field(default_factory=utc_now)
+    deleted_at: Optional[datetime] = Field(default=None, index=True)

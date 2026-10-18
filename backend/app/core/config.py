@@ -2,6 +2,7 @@
 应用配置模块
 """
 
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 from typing import List
@@ -80,6 +81,42 @@ class Settings(BaseSettings):
 
     # ==================== 对话配置 ====================
     MAX_CHAT_HISTORY_ROUNDS: int = 20       # 最大保留历史对话轮数
+
+    # ==================== 鉴权配置 ====================
+    # 必填，无默认值：未配置或过短时应用启动直接失败，绝不使用内置密钥兜底。
+    JWT_SECRET: str = Field(
+        ...,
+        min_length=32,
+        repr=False,
+        description="JWT 签名密钥（至少 32 字符）。仅从环境变量/本地 .env 注入。",
+    )
+    JWT_ALG: str = "HS256"
+    ACCESS_TTL_MIN: int = 15
+    REFRESH_TTL_DAYS: int = 7
+
+    @field_validator("JWT_SECRET")
+    @classmethod
+    def validate_jwt_secret(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 32:
+            raise ValueError("JWT_SECRET 至少需要 32 个字符，请用 secrets.token_urlsafe 生成")
+        if value.lower() in {"change-me", "changeme", "secret", "dev", "test"}:
+            raise ValueError("JWT_SECRET 不能使用占位值")
+        return value
+
+    @field_validator("JWT_ALG")
+    @classmethod
+    def validate_jwt_alg(cls, value: str) -> str:
+        if value != "HS256":
+            raise ValueError("当前仅支持 JWT_ALG=HS256")
+        return value
+
+    @field_validator("ACCESS_TTL_MIN", "REFRESH_TTL_DAYS")
+    @classmethod
+    def validate_positive_ttl(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("ACCESS_TTL_MIN / REFRESH_TTL_DAYS 必须为正整数")
+        return value
 
     class Config:
         env_file = (".env", "backend/.env")
