@@ -644,9 +644,9 @@ pgvector 是 PG 的向量类型 + 索引；PG FTS 是 tsvector/tsquery/GIN。本
 
 - `make test-fast`：13 passed；
 - 30 条越权 + 持久化 + KB + owner 隔离：36 passed；
-- 全量 `python3 -m pytest tests -q`：**85 passed in 47.69s**（GraphRAG 测试删除 + 缓存测试 + admin 测试后实跑）；
+- 全量 `python3 -m pytest tests -q`：**86 passed in 42.97s**（GraphRAG 测试删除 + 缓存 + admin + 观测测试后实跑）；
 - 前端 build：通过；
-- **但 85/85 不等于 85 条都在测它名字声称的能力**：
+- **但 86/86 不等于 86 条都在测它名字声称的能力**：
   - 原 `test_sliding_window_rate_limiter_1000_qps` 已改名为 `test_sliding_window_rate_limiter_limit`，且注释“不是压测”；
   - `test_pgvector_extension_active` 现在检查扩展 + vector 列 + HNSW 索引，但**不检查召回质量**；
   - `test_lora_service.py` 测登记表，不是训练好的 LoRA。
@@ -807,7 +807,7 @@ Skill 的核心是**能力包 + 渐进式加载**：名称/描述先给模型，
 | “8 份 benchmark 样本” | `data/benchmark_resumes` 只有 4 份对抗样本；4 份真实简历在 `data/真实简历` |
 | “L2 摘要存 interview_messages” | 摘要存 `interview_sessions.summary`；`interview_messages` 存逐条消息 |
 | “Go/Kafka 生产能力” | 没有 Go 源码；只有 `docs/archive/PRD_Campus_Career_Agent_Gin_Kafka.md` 设计稿 |
-| “80/80 证明这些能力都做了” | 当前是 85/85（含 admin 控制面测试），且测试名与内容有偏差（见 6.4） |
+| “80/80 证明这些能力都做了” | 当前是 86/86（含 admin/观测测试），且测试名与内容有偏差（见 6.4） |
 
 ### 11.3 比 RRF/MCP/Skills 更优先的 P0：先把叙事和代码对齐
 

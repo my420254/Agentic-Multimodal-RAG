@@ -18,7 +18,7 @@ from sqlmodel import Session, func, select
 from app.core.database import get_session
 from app.core.deps import get_current_admin
 from app.core.security import hash_password
-from app.models import ApiKey, AuditLog, CustomModel, KnowledgeBase, ModelType, SystemPrompt, User
+from app.models import ApiKey, AuditLog, CustomModel, KnowledgeBase, ModelType, RequestLog, SystemPrompt, User
 from app.services.audit_service import record_audit
 from app.services.prompt_service import prompt_workshop_service
 from app.services.system_prompt_service import system_prompt_service
@@ -159,6 +159,7 @@ async def overview(
         "api_keys": count(ApiKey),
         "system_prompts": count(SystemPrompt),
         "audit_logs": count(AuditLog),
+        "request_logs": count(RequestLog),
     }
 
 
@@ -550,6 +551,66 @@ async def rollback_prompt(
     session: Session = Depends(get_session),
 ):
     return await publish_prompt(key, req, admin, session)
+
+
+# ==================== 观测 ====================
+
+@router.get("/request-logs")
+async def list_request_logs(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    admin: User = Depends(get_current_admin),
+    session: Session = Depends(get_session),
+):
+    total = int(session.exec(select(func.count()).select_from(RequestLog)).one())
+    rows = session.exec(
+        select(RequestLog).order_by(RequestLog.created_at.desc())
+        .offset((page - 1) * page_size).limit(page_size)
+    ).all()
+    return {
+        "items": [
+            {
+                "id": r.id,
+                "method": r.method,
+                "path": r.path,
+                "status_code": r.status_code,
+                "duration_ms": r.duration_ms,
+                "user_id": r.user_id,
+                "client_ip": r.client_ip,
+                "created_at": r.created_at,
+            }
+            for r in rows
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@router.get("/observability/summary")
+async def observability_summary(
+    admin: User = Depends(get_current_admin),
+    session: Session = Depends(get_session),
+):
+    total = int(session.exec(select(func.count()).select_from(RequestLog)).one())
+    errors = int(session.exec(
+        select(func.count()).select_from(RequestLog).where(RequestLog.status_code >= 400)
+    ).one())
+    avg_latency = session.exec(select(func.avg(RequestLog.duration_ms))).one()
+    top_rows = session.exec(
+        select(RequestLog.path, func.count().label("cnt"))
+        .group_by(RequestLog.path)
+        .order_by(func.count().desc())
+        .limit(10)
+    ).all()
+    return {
+        "total_requests": total,
+        "error_requests": errors,
+        "error_rate": round(errors / total, 4) if total else 0.0,
+        "avg_latency_ms": round(float(avg_latency), 2) if avg_latency is not None else 0.0,
+        "top_paths": [{"path": p, "count": int(c)} for p, c in top_rows],
+        "metrics_endpoint": "/metrics",
+    }
 
 
 # ==================== 审计 ====================

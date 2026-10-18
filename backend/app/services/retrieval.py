@@ -23,6 +23,7 @@ from app.services.vector_store import VectorStoreService
 from app.services.embedding import EmbeddingService
 from app.services.bm25 import BM25Index, get_bm25_index
 from app.core.config import get_settings
+from app.core.metrics import observe_retrieval
 
 settings = get_settings()
 
@@ -268,6 +269,7 @@ class RetrievalService:
             cached = self.cache.get(query, kb_ids, search_mode, top_k, cache_params)
             if cached:
                 print(f"✅ [Retrieval] 命中缓存")
+                observe_retrieval("cache_hit", 0.0)
                 return cached, {"from_cache": True}
 
         results = []
@@ -366,6 +368,7 @@ class RetrievalService:
             "bm25_latency_ms": 0,
         }
 
+        observe_retrieval("vector", latency / 1000.0)
         return all_results, metrics
 
     async def _bm25_search(
@@ -414,6 +417,7 @@ class RetrievalService:
             "bm25_latency_ms": latency,
         }
 
+        observe_retrieval("bm25", latency / 1000.0)
         return all_results, metrics
 
     async def _hybrid_search(

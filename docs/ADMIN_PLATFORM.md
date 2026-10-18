@@ -36,13 +36,21 @@ Dify/FastGPT/RAGFlow 是“另一个产品”，不是后台；Langfuse/LangSmit
 - 建表/账号脚本：`scripts/seed_admin.py`；
 - 测试：`backend/tests/test_admin_api.py`，全量 **85 passed**（2026-10-19）。
 
-**尚未实现（P1/P2，不要对外说已完成）：**
+**P1-lite 观测已落地：**
+
+- `GET /metrics`：Prometheus 文本指标（HTTP 请求数/耗时、检索阶段耗时）；
+- `request_logs`：方法/路径/状态/耗时/user_id/client_ip，不含 query/response 正文；
+- `/admin` → “观测”标签：请求总数、错误率、平均耗时、最近请求；
+- 请求日志可在测试环境用 `REQUEST_LOG_ENABLED=false` 关闭。
+
+**尚未实现（P1 完整版/P2，不要对外说已完成）：**
 
 - Langfuse/Phoenix trace、bad case 工作台；
-- Prometheus `/metrics` + Grafana；
+- Grafana 看板/告警；
 - Locust 压测；
 - 线上 A/B 实验与 assignment；
-- 工具只读沙箱/链路回放。
+- 工具只读沙箱/链路回放；
+- 非 admin 路由的细粒度 scope 强制。
 
 **API Key scope 现状：**
 

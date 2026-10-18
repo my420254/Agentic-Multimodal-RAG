@@ -25,6 +25,8 @@ const Admin: React.FC = () => {
   const [models, setModels] = useState<any[]>([]);
   const [prompts, setPrompts] = useState<any[]>([]);
   const [audits, setAudits] = useState<any[]>([]);
+  const [obs, setObs] = useState<any>({});
+  const [requestLogs, setRequestLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
   const [userOpen, setUserOpen] = useState(false);
@@ -48,16 +50,19 @@ const Admin: React.FC = () => {
   const load = async () => {
     setLoading(true);
     try {
-      const [o, u, k, m, p, a] = await Promise.all([
+      const [o, u, k, m, p, a, s, rl] = await Promise.all([
         api.getAdminOverview(),
         api.getAdminUsers({ page: 1, page_size: 100 }),
         api.getAdminApiKeys({ page: 1, page_size: 100 }),
         api.getAdminModels(),
         api.getAdminPrompts(),
         api.getAdminAuditLogs({ page: 1, page_size: 50 }),
+        api.getAdminObservabilitySummary(),
+        api.getAdminRequestLogs({ page: 1, page_size: 50 }),
       ]);
       setOverview(o || {}); setUsers(u?.items || []); setKeys(k?.items || []);
       setModels(m?.items || []); setPrompts(p?.items || []); setAudits(a?.items || []);
+      setObs(s || {}); setRequestLogs(rl?.items || []);
     } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
@@ -178,6 +183,14 @@ const Admin: React.FC = () => {
     { title: '版本数', dataIndex: 'versions' },
     { title: '操作', render: (_: any, r: any) => <Button size="small" onClick={() => openPrompt(r.key)}>版本管理</Button> },
   ];
+  const requestCols = [
+    { title: '时间', dataIndex: 'created_at', render: fmt },
+    { title: '方法', dataIndex: 'method' },
+    { title: '路径', dataIndex: 'path', ellipsis: true },
+    { title: '状态', dataIndex: 'status_code', render: (v: number) => <Tag color={v >= 400 ? 'red' : 'green'}>{v}</Tag> },
+    { title: '耗时', dataIndex: 'duration_ms', render: (v: number) => `${Number(v || 0).toFixed(1)} ms` },
+    { title: '用户', dataIndex: 'user_id', ellipsis: true, render: (v: string) => v || '-' },
+  ];
   const auditCols = [
     { title: '时间', dataIndex: 'created_at', render: fmt },
     { title: '操作', dataIndex: 'action', render: (v: string) => <Text code>{v}</Text> },
@@ -233,6 +246,21 @@ const Admin: React.FC = () => {
             </div>
           ) },
           { key: 'audit', label: '审计日志', children: <Table rowKey="id" size="small" columns={auditCols} dataSource={audits} pagination={false} /> },
+          { key: 'observability', label: '观测', children: (
+            <div>
+              <Row gutter={12} style={{ marginBottom: 12 }}>
+                <Col span={6}><Card size="small"><Statistic title="请求总数" value={Number(obs.total_requests || 0)} /></Card></Col>
+                <Col span={6}><Card size="small"><Statistic title="错误数" value={Number(obs.error_requests || 0)} valueStyle={{ color: '#cf1322' }} /></Card></Col>
+                <Col span={6}><Card size="small"><Statistic title="错误率" value={Number((obs.error_rate || 0) * 100).toFixed(2)} suffix="%" /></Card></Col>
+                <Col span={6}><Card size="small"><Statistic title="平均耗时" value={Number(obs.avg_latency_ms || 0).toFixed(1)} suffix="ms" /></Card></Col>
+              </Row>
+              <Space style={{ marginBottom: 12 }}>
+                <Button onClick={() => window.open('http://127.0.0.1:8000/metrics', '_blank')}>打开 /metrics</Button>
+                <Text type="secondary">Prometheus 文本指标；请求日志不含 query/response 正文。</Text>
+              </Space>
+              <Table rowKey="id" size="small" columns={requestCols} dataSource={requestLogs} pagination={false} />
+            </div>
+          ) },
         ]} />
       </Card>
 

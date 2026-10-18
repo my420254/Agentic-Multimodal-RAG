@@ -317,3 +317,18 @@ class AuditLog(SQLModel, table=True):
     target_id: Optional[str] = Field(default=None, max_length=128)
     detail: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=utc_now, index=True)
+
+
+class RequestLog(SQLModel, table=True):
+    """HTTP 请求日志（轻量观测；不含 query/response 正文，避免 PII）"""
+
+    __tablename__ = "request_logs"
+
+    id: str = Field(default_factory=generate_uuid, primary_key=True)
+    method: str = Field(max_length=16)
+    path: str = Field(index=True, max_length=255)
+    status_code: int
+    duration_ms: float
+    user_id: Optional[str] = Field(default=None, index=True, max_length=64)
+    client_ip: Optional[str] = Field(default=None, max_length=64)
+    created_at: datetime = Field(default_factory=utc_now, index=True)

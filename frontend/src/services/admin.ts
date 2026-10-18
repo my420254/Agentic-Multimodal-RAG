@@ -52,5 +52,11 @@ export const publishAdminPrompt = (key: string, version: number): Promise<any> =
 export const rollbackAdminPrompt = (key: string, version: number): Promise<any> =>
   request.post(`/admin/prompts/${key}/rollback`, { version });
 
+export const getAdminRequestLogs = (params?: Record<string, any>): Promise<any> =>
+  request.get('/admin/request-logs', { params });
+
+export const getAdminObservabilitySummary = (): Promise<any> =>
+  request.get('/admin/observability/summary');
+
 export const getAdminAuditLogs = (params?: Record<string, any>): Promise<any> =>
   request.get('/admin/audit-logs', { params });

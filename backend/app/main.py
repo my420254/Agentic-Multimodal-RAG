@@ -5,13 +5,17 @@ FastAPI 应用入口
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.routing import APIRoute
 from contextlib import asynccontextmanager
 import os
+import time
+from sqlmodel import Session
 
 from app.core.config import get_settings, ensure_directories
-from app.core.database import init_db
+from app.core.database import engine, init_db
+from app.core.metrics import metrics_payload, observe_http
+from app.models import RequestLog
 from app.api import api_router
 
 settings = get_settings()
@@ -53,6 +57,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/metrics", include_in_schema=False)
+async def metrics():
+    payload, media_type = metrics_payload()
+    return Response(content=payload, media_type=media_type)
+
+
 # 注册 API 路由
 app.include_router(api_router)
 
@@ -60,18 +70,39 @@ app.include_router(api_router)
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     import sys
-    # 强制刷新缓冲区
+    import uuid
+
     sys.stdout.flush()
+    start = time.perf_counter()
     print(f"[Request] {request.method} {request.url.path}")
+    status_code = 500
     try:
         response = await call_next(request)
-        print(f"[Response] {response.status_code} {request.url.path}")
-        sys.stdout.flush()
+        status_code = response.status_code
         return response
-    except Exception as e:
-        print(f"[Error] {request.url.path}: {str(e)}")
+    finally:
+        duration = time.perf_counter() - start
+        try:
+            observe_http(request.method, request.url.path, status_code, duration)
+        except Exception:
+            pass
+        # 不记录 metrics/静态文件/文档；请求日志默认开启，测试环境关闭
+        if settings.REQUEST_LOG_ENABLED and request.url.path.startswith("/api/v1/"):
+            try:
+                with Session(engine) as session:
+                    session.add(RequestLog(
+                        method=request.method,
+                        path=request.url.path[:255],
+                        status_code=status_code,
+                        duration_ms=round(duration * 1000, 2),
+                        user_id=getattr(request.state, "user_id", None),
+                        client_ip=request.client.host if request.client else None,
+                    ))
+                    session.commit()
+            except Exception as e:
+                print(f"[RequestLog] skip: {e}")
+        print(f"[Response] {status_code} {request.url.path} ({duration * 1000:.1f}ms)")
         sys.stdout.flush()
-        raise e
 
 # 静态文件服务（图片预览）
 if os.path.exists(settings.IMAGE_DIR):

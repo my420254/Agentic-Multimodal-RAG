@@ -72,6 +72,7 @@ def get_current_user(
         api_user = _api_key_user(credentials.credentials, session, request)
         if api_user is not None:
             request.state.auth_method = "api_key"
+            request.state.user_id = api_user.id
             return api_user
         raise _unauthorized("access token 无效或已过期")
 
@@ -80,6 +81,7 @@ def get_current_user(
         raise _unauthorized("access token 缺少 sub")
 
     request.state.auth_method = "jwt"
+    request.state.user_id = user_id
     user = session.get(User, user_id)
     if user is None or user.deleted_at is not None or user.status != "active":
         # 不区分“用户不存在 / 已注销 / 被禁用”，避免账号枚举。

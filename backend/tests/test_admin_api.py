@@ -157,6 +157,20 @@ def test_change_password(client, data):
     assert client.post("/api/v1/auth/login", json={"student_id": sid, "password": "New@654321"}).status_code == 200
 
 
+def test_metrics_and_observability_endpoints(client, data):
+    r = client.get("/metrics")
+    assert r.status_code == 200
+    assert "rag_http_requests_total" in r.text
+
+    r = client.get("/api/v1/admin/observability/summary", headers=_h(data["admin_token"]))
+    assert r.status_code == 200
+    assert "total_requests" in r.json()
+
+    r = client.get("/api/v1/admin/request-logs", headers=_h(data["admin_token"]))
+    assert r.status_code == 200
+    assert "items" in r.json()
+
+
 def test_admin_prompt_versioning_and_audit(client, data):
     key = "mock_interviewer"
     resp = client.post(

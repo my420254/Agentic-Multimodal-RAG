@@ -21,6 +21,7 @@ from app.models.models import (
     ApiKey,
     SystemPrompt,
     AuditLog,
+    RequestLog,
 )
 
 __all__ = [
@@ -42,4 +43,5 @@ __all__ = [
     "ApiKey",
     "SystemPrompt",
     "AuditLog",
+    "RequestLog",
 ]
