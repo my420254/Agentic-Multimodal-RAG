@@ -625,8 +625,14 @@ pgvector 是 PG 的向量类型 + 索引；PG FTS 是 tsvector/tsquery/GIN。本
 
 - `make test-fast`：13 passed；
 - 30 条越权 + 持久化 + KB + owner 隔离：36 passed；
+- 全量 `python3 -m pytest tests -q`：**80 passed in 38.73s**（2026-10-18 实跑）；
 - 前端 build：通过；
-- 全量 `make test` 没跑（包含真实 LLM 调用），不要编“全量通过”。
+- **但 80/80 不等于 80 条都在测它名字声称的能力**：
+  - `test_sliding_window_rate_limiter_1000_qps` 不是 1000 QPS 压测；
+  - `test_pgvector_extension_active` 只检查扩展是否存在，检索不走 pgvector；
+  - `test_lora_service.py` 测登记表，不是训练好的 LoRA；
+  - `test_graphrag_subgraph_traversal` 测手写技能图，不是文档图谱。
+- 部分测试依赖真实 LLM/网络；面试现场要稳定，先加 mock（`pytest-mock`/`unittest.mock`）做离线回归，否则断网会翻车。
 
 ---
 
@@ -756,3 +762,62 @@ Skill 的核心是**能力包 + 渐进式加载**：名称/描述先给模型，
 - **Skills**：3 个固定能力，prompt 模板已经够；能力多、正文大、要脚本/权限时才值得。
 
 面试官如果追问“那你为什么不用”，就答“不是不会，是当前规模下收益不覆盖复杂度；我做过 RRF 对照，MCP/Skills 我知道什么时候该上”。这比硬说“我们用了”安全得多。
+
+---
+
+## 11. 对“全量审计报告”的采纳清单
+
+审计报告的大方向是对的：**按真实代码讲、指标要能复现、不要写 Go/Kafka/pgvector/RLS 这些没落地的东西**。但不能整份照收，下面几条必须修正。
+
+### 11.1 应该采纳的
+
+- 用真实评测数字，不用旧 73.3%/33.3%；
+- 强调多租户隔离、PG 持久化记忆、LangGraph 工具循环这三个真实亮点；
+- 面试前准备可复现的测试/演示命令；
+- 给依赖网络的测试加 mock，保证现场断网也能跑；
+- 承认前端 bundle 偏大，生产要做 manualChunks；
+- 简历只写真实技术栈：FastAPI + LangGraph + PostgreSQL + Redis + Chroma + BGE-M3。
+
+### 11.2 必须修正/不要照抄的
+
+| 审计说法 | 真实情况 |
+| :--- | :--- |
+| “AST 结构化事实保真护栏” | 代码里没有 AST；archive PRD 里有设计，当前实现是提示词/占位符约束 |
+| “PostgreSQL RLS 行级隔离” | 没有 RLS；是 `owner_id` 查询过滤 + 404 隐藏存在性 |
+| “GraphRAG 代码已删” | 没删；`mock_interview.py`、`career.py` 仍 import/调用 `graphrag_service` |
+| “BGE-Reranker-large” | 当前报告用的是 `BAAI/bge-reranker-v2-m3`；large 是 archive PRD 的旧口径 |
+| “8 份 benchmark 样本” | `data/benchmark_resumes` 只有 4 份对抗样本；4 份真实简历在 `data/真实简历` |
+| “L2 摘要存 interview_messages” | 摘要存 `interview_sessions.summary`；`interview_messages` 存逐条消息 |
+| “Go/Kafka 生产能力” | 没有 Go 源码；只有 `docs/archive/PRD_Campus_Career_Agent_Gin_Kafka.md` 设计稿 |
+| “80/80 证明这些能力都做了” | 80/80 是事实，但测试名与内容有偏差（见 6.4） |
+
+### 11.3 比 RRF/MCP/Skills 更优先的 P0：先把叙事和代码对齐
+
+1. **删掉实验室署名**：`prompt_service.py`、`career_matcher.py`、`job_fraud_detector.py`、`mock_interview.py`、`graphrag_service.py`、`api/career.py`、前端 `CareerCenter` 都有“辽宁省公共舆情与网络安全信息系统重点实验室”；你的材料里没有这个单位，全部删掉或改成真实单位。
+2. **删掉 `career_matcher` 里硬编码的假技术**：`“采用 PostgreSQL GIN 倒排 + pgvector HNSW 双路并行召回，配合 BGE-Reranker-large”` 与真实实现不符，必须改成“BGE-M3 + jieba BM25 + Chroma + 可选 BGE-Reranker-v2-m3”，否则模型会把假话输出给用户。
+3. **处理 GraphRAG**：要么从模拟面试/API/UI 移除，要么明确标注“静态技能图，不是文档图谱”；不要再说“已删”。
+4. **模拟面试四阶段/1-10 分**：当前阶段由轮次驱动、分数由模型自报；要么改成检索原文驱动，要么 UI 不显示阶段/分数，只显示“材料支持/材料没有”。
+5. **PRD/交接文档**：`docs/PRD.md` 第 0 章、`docs/HANDOFF.md` 与现状不一致；对外只使用 `docs/INTERVIEW_QA.md` + `backend/benchmark/report.md`，或把旧文档移到 `docs/archive/`。
+6. **测试命名**：`1000_qps`、`pgvector_extension_active` 这类名字要么改，要么加注释；不要拿它们当“高并发/pgvector 已落地”的证据。
+
+### 11.4 优先级结论
+
+如果目标是**产品效果**：
+
+```text
+P0 叙事/事实对齐
+  → P1 RRF 可配置 + A/B（唯一有检索指标收益的）
+  → 停止。MCP/Skills 当前规模不需要。
+```
+
+如果目标是**Agent 岗面试作品**：
+
+```text
+P0 叙事/事实对齐
+  → P1 RRF 可配置 + A/B
+  → P2 真实 MCP Server/Client（工具接入层演示）
+  → P3 真实 Skills（manifest + 渐进加载 + 至少 3 个能力包）
+  → P4 pgvector/PG FTS（只有想统一存储时才做）
+```
+
+**RRF 合理，MCP 有边界，Skills 最后。** 但三者都不能替代 P0；如果实验室署名、假的 pgvector/GIN、GraphRAG、模拟面试分数还在，加再多协议和 Skill 只会让追问更容易穿。
