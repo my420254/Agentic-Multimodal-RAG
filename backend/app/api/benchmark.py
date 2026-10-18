@@ -9,10 +9,15 @@ from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
 from app.core.database import get_session
+from app.core.deps import get_current_user
 from app.models.models import BenchmarkRecord
 from app.schemas.schemas import ApiResponse
 
-router = APIRouter(prefix="/benchmark", tags=["Benchmark & Evaluation"])
+router = APIRouter(
+    prefix="/benchmark",
+    tags=["Benchmark & Evaluation"],
+    dependencies=[Depends(get_current_user)],
+)
 
 REPORT_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "../../benchmark/report.md")

@@ -9,6 +9,7 @@ from datetime import datetime
 import os
 
 from app.core.database import get_session
+from app.core.deps import get_current_user
 from app.models import KnowledgeBase, FileDocument
 from app.schemas import (
     KnowledgeBaseCreate,
@@ -18,7 +19,11 @@ from app.schemas import (
 )
 from app.services.vector_store import VectorStoreService
 
-router = APIRouter(prefix="/knowledge-bases", tags=["KnowledgeBase"])
+router = APIRouter(
+    prefix="/knowledge-bases",
+    tags=["KnowledgeBase"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 @router.get("", response_model=ApiResponse[List[KnowledgeBaseResponse]])

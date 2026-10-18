@@ -12,6 +12,7 @@ from sqlmodel import Session, select, delete, func
 from typing import List, Optional
 
 from app.core.database import get_session
+from app.core.deps import get_current_user
 from app.models import KnowledgeBase, CustomModel, RetrievalLog
 from app.schemas import (
     RecallRequest, RecallResult, ApiResponse, RecallTestResponse,
@@ -22,7 +23,7 @@ from app.services.rerank import RerankService, batch_rerank, expand_context
 import time
 import re
 
-router = APIRouter(tags=["Recall"])
+router = APIRouter(tags=["Recall"], dependencies=[Depends(get_current_user)])
 
 
 @router.post(

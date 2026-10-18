@@ -8,10 +8,11 @@ from typing import List
 from datetime import datetime, timezone
 
 from app.core.database import get_session
+from app.core.deps import get_current_user
 from app.models import FileDocument, DocumentChunk, FileStatus
 from app.schemas import ChunkResponse, ChunkUpdate, VectorizeResponse, ApiResponse
 
-router = APIRouter(tags=["Chunk"])
+router = APIRouter(tags=["Chunk"], dependencies=[Depends(get_current_user)])
 
 
 @router.get("/files/{file_id}/chunks", response_model=ApiResponse[List[ChunkResponse]])

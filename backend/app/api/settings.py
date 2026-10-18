@@ -9,11 +9,19 @@ from sqlmodel import Session, select
 
 from app.core.config import get_settings
 from app.core.database import get_session
+from app.core.deps import get_current_user
 from app.schemas.schemas import ApiResponse, CustomModelCreate, CustomModelResponse, CustomModelUpdate
 from app.models import CustomModel, ModelType
 
-router = APIRouter(prefix="/settings", tags=["Meta"])
-models_router = APIRouter(tags=["Meta"]) # 单独的 /models 路由
+router = APIRouter(
+    prefix="/settings",
+    tags=["Meta"],
+    dependencies=[Depends(get_current_user)],
+)
+models_router = APIRouter(
+    tags=["Meta"],
+    dependencies=[Depends(get_current_user)],
+)  # 单独的 /models 路由
 settings = get_settings()
 
 

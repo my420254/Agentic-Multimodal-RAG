@@ -11,12 +11,13 @@ import aiofiles
 from datetime import datetime
 
 from app.core.database import get_session
+from app.core.deps import get_current_user
 from app.core.config import get_settings
 from app.models import KnowledgeBase, FileDocument, FileStatus, generate_uuid, DocumentChunk
 from app.schemas import FileUploadResponse, FileStatusResponse, ApiResponse
 from app.tasks.parse_tasks import process_file_parsing
 
-router = APIRouter(tags=["File"])
+router = APIRouter(tags=["File"], dependencies=[Depends(get_current_user)])
 settings = get_settings()
 
 
