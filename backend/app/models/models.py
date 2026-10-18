@@ -267,3 +267,53 @@ class UserProfile(SQLModel, table=True):
     field: str = Field(max_length=100)
     value: str
     updated_at: datetime = Field(default_factory=utc_now)
+
+
+class ApiKey(SQLModel, table=True):
+    """外部 API Key（只存 hash，明文仅在创建时返回一次）"""
+
+    __tablename__ = "api_keys"
+
+    id: str = Field(default_factory=generate_uuid, primary_key=True)
+    owner_id: str = Field(index=True, max_length=64)
+    name: str = Field(max_length=100)
+    key_prefix: str = Field(index=True, max_length=16)
+    key_hash: str = Field(unique=True, index=True, max_length=64)
+    scopes: str = Field(default="chat:read,kb:read", max_length=255)
+    last_used_at: Optional[datetime] = Field(default=None)
+    expires_at: Optional[datetime] = Field(default=None)
+    revoked_at: Optional[datetime] = Field(default=None)
+    created_by: Optional[str] = Field(default=None, max_length=64)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class SystemPrompt(SQLModel, table=True):
+    """全局系统提示词版本（区别于用户级提示词工坊覆盖）"""
+
+    __tablename__ = "system_prompts"
+    __table_args__ = (
+        UniqueConstraint("key", "version", name="uq_system_prompts_key_version"),
+    )
+
+    id: str = Field(default_factory=generate_uuid, primary_key=True)
+    key: str = Field(index=True, max_length=64)
+    version: int = Field(default=1)
+    content: str
+    status: str = Field(default="draft", index=True, max_length=16)  # draft|active|archived
+    created_by: Optional[str] = Field(default=None, max_length=64)
+    created_at: datetime = Field(default_factory=utc_now)
+    published_at: Optional[datetime] = Field(default=None)
+
+
+class AuditLog(SQLModel, table=True):
+    """后台写操作审计日志"""
+
+    __tablename__ = "audit_logs"
+
+    id: str = Field(default_factory=generate_uuid, primary_key=True)
+    actor_id: Optional[str] = Field(default=None, index=True, max_length=64)
+    action: str = Field(index=True, max_length=64)
+    target_type: str = Field(max_length=64)
+    target_id: Optional[str] = Field(default=None, max_length=128)
+    detail: Optional[str] = Field(default=None)
+    created_at: datetime = Field(default_factory=utc_now, index=True)

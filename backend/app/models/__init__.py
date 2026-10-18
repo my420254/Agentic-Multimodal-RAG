@@ -18,6 +18,9 @@ from app.models.models import (
     InterviewSession,
     InterviewMessage,
     UserProfile,
+    ApiKey,
+    SystemPrompt,
+    AuditLog,
 )
 
 __all__ = [
@@ -36,4 +39,7 @@ __all__ = [
     "InterviewSession",
     "InterviewMessage",
     "UserProfile",
+    "ApiKey",
+    "SystemPrompt",
+    "AuditLog",
 ]

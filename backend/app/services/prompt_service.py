@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 import redis
 
 from app.core.config import get_settings
+from app.services.system_prompt_service import system_prompt_service
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -245,8 +246,11 @@ class PromptService:
         return user_id.strip()
 
     def _merge_default(self, key: str, override: Optional[str]) -> PromptTemplate:
-        """从代码常量深拷贝一份默认模板，再叠加当前用户自己的覆盖值。"""
+        """默认模板 -> 全局 active -> 当前用户覆盖。"""
         tpl = self.DEFAULT_TEMPLATES[key].model_copy(deep=True)
+        global_active = system_prompt_service.get_active(key)
+        if global_active:
+            tpl.system_prompt = global_active
         if override is not None:
             tpl.system_prompt = override
             tpl.is_custom = True

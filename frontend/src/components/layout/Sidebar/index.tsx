@@ -13,6 +13,7 @@ import {
   LogoutOutlined,
   MessageOutlined,
   RocketOutlined,
+  SafetyCertificateOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
@@ -23,7 +24,7 @@ const { Text } = Typography;
 
 type MenuItem = Required<MenuProps>['items'][number];
 
-const menuItems: MenuItem[] = [
+const baseMenuItems: MenuItem[] = [
   {
     key: '/career/resume',
     icon: <FileTextOutlined />,
@@ -55,6 +56,9 @@ const Sidebar: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const user = useAuthStore((state) => state.user);
+  const menuItems: MenuItem[] = user?.role === 'admin'
+    ? [...baseMenuItems, { key: '/admin', icon: <SafetyCertificateOutlined />, label: '管理后台' }]
+    : baseMenuItems;
 
   const handleLogout = () => {
     clearAuth();
@@ -69,6 +73,7 @@ const Sidebar: React.FC = () => {
     if (pathname.startsWith('/career')) return '/career/resume';
     if (pathname.startsWith('/kb')) return '/kb';
     if (pathname.startsWith('/chat')) return '/chat';
+    if (pathname.startsWith('/admin')) return '/admin';
     return '/career/resume';
   };
 

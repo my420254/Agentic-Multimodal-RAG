@@ -3,7 +3,7 @@ API 路由汇总
 """
 
 from fastapi import APIRouter
-from app.api import settings, knowledge_base, files, chunks, recall, chat, benchmark, career, auth
+from app.api import settings, knowledge_base, files, chunks, recall, chat, benchmark, career, auth, admin
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -18,4 +18,5 @@ api_router.include_router(chat.router)
 api_router.include_router(benchmark.router)
 api_router.include_router(career.router)
 api_router.include_router(auth.router)
+api_router.include_router(admin.router)
 

@@ -20,6 +20,7 @@ from app.core.security import (
     TokenExpiredError,
     create_token_pair,
     decode_token,
+    hash_password,
     verify_password,
 )
 from app.models import User
@@ -34,6 +35,11 @@ class LoginRequest(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_token: str = Field(min_length=1, description="登录时下发的 refresh token")
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str = Field(min_length=1, max_length=72)
+    new_password: str = Field(min_length=8, max_length=72)
 
 
 class TokenPair(BaseModel):
@@ -103,6 +109,23 @@ def refresh(req: RefreshRequest, session: Session = Depends(get_session)) -> Tok
 
     pair = create_token_pair(str(user.id), user.role)
     return TokenPair(**pair)
+
+
+@router.post("/change-password")
+def change_password(
+    req: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    """当前登录用户修改自己的密码；旧密码必须匹配。"""
+    if not verify_password(req.old_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="旧密码错误")
+    if req.old_password == req.new_password:
+        raise HTTPException(status_code=400, detail="新密码不能与旧密码相同")
+    current_user.password_hash = hash_password(req.new_password)
+    session.add(current_user)
+    session.commit()
+    return {"message": "密码已修改，请使用新密码重新登录"}
 
 
 @router.get("/me", response_model=UserOut)

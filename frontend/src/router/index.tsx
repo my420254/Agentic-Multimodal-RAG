@@ -5,6 +5,7 @@
 import { createBrowserRouter, Navigate, useRouteError } from 'react-router-dom';
 import { AppLayout } from '@/components/layout';
 import RequireAuth from '@/components/auth/RequireAuth';
+import RequireAdmin from '@/components/auth/RequireAdmin';
 import { Button, Result } from 'antd';
 
 // 懒加载页面组件
@@ -40,6 +41,7 @@ const MultiFilePreview = lazy(() => import('@/pages/KnowledgeBase/MultiFilePrevi
 const Chat = lazy(() => import('@/pages/Chat'));
 const CareerCenter = lazy(() => import('@/pages/CareerCenter'));
 const Login = lazy(() => import('@/pages/Login'));
+const Admin = lazy(() => import('@/pages/Admin'));
 
 // 加载中组件
 const PageLoading = () => (
@@ -125,6 +127,16 @@ const router = createBrowserRouter([
           <LazyComponent>
             <Chat />
           </LazyComponent>
+        ),
+      },
+      {
+        path: 'admin',
+        element: (
+          <RequireAdmin>
+            <LazyComponent>
+              <Admin />
+            </LazyComponent>
+          </RequireAdmin>
         ),
       },
       {
