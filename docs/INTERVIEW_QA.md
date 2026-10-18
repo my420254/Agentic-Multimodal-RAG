@@ -640,7 +640,14 @@ pgvector 是 PG 的向量类型 + 索引；PG FTS 是 tsvector/tsquery/GIN。本
 - 前端不再显示 1–10 分，只显示“基于简历材料”和引用片段；
 - 实测：2023001 选张梦洋 PDF，4 条 citations 全部来自该 PDF；2023002 传同一 `resume_file_id` 返回 404。
 
-### 6.6 测试
+### 6.6 模拟面试 grounding E2E
+
+- 10 条（4 份真实简历 × 岗位/回答组合）API E2E；
+- 结果：**10/10** `grounding_available=true`，citations 全部来自选定简历，单轮 3.0–4.9s；
+- 脚本：`backend/benchmark/interview_grounding_eval.py`；
+- 这不证明简历里的数字真实，只证明“面试问题来自这份材料”。
+
+### 6.7 测试
 
 - `make test-fast`：13 passed；
 - 30 条越权 + 持久化 + KB + owner 隔离：36 passed；

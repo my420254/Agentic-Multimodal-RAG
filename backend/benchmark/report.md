@@ -72,3 +72,24 @@ JWT_SECRET="$(python3 -c 'import secrets;print(secrets.token_urlsafe(48))')" \
 ```
 
 真实简历、OCR corpus、逐题报告均含 PII，已在 `.gitignore` 中排除，只保留在本地。
+
+## 1.5 模拟面试 grounding E2E（2026-10-19）
+
+- 脚本：`backend/benchmark/interview_grounding_eval.py`；
+- 用例：4 份真实简历 × 10 个岗位/回答组合；
+- 每一轮先按 `resume_file_id` 过滤 pgvector，取 top4 chunk，再注入面试官提示词；
+- 判定：
+  - `grounding_available=true`；
+  - `grounding_citations` 非空；
+  - 所有 citation 的 `file_name` **只能等于选定文件**；
+  - 响应里不能出现 GraphRAG 字段；
+  - 问题文本长度 ≥20。
+- 结果：**10/10 通过**；每轮 citation 4 条，全部来自所选简历；单轮耗时约 **3.0–4.9s**（单次样本，不是 P95）。
+- 说明：面试官问题会引用简历里的原始表述（例如简历自己写了 RRF/FAISS/8KB），这不代表系统验证了这些数字；系统只保证“问题来自这份材料”。
+
+复算：
+
+```bash
+cd /home/yang/Agentic-Multimodal-RAG/backend
+python3 benchmark/interview_grounding_eval.py
+```
