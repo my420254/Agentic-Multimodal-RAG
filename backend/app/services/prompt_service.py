@@ -2,7 +2,7 @@
 提示词工程管理与自定义工坊服务 (Prompt Engineering & Custom Workshop)
 研发单位：辽宁大学 · 辽宁省公共舆情与网络安全信息系统重点实验室
 核心能力：
-1. 预置四大就业辅导生产级黄金提示词 (模拟面试官, 简历诊断医生, STAR 润色师, 心理疏导导师)
+1. 预置三大就业辅导生产级黄金提示词 (模拟面试官, 简历诊断医生, STAR 润色师)
 2. 支持学生/导师在前端在线查看、编写、替换与测试自定义提示词
 3. 提示词动态变量替换与少样本 CoT (Chain-of-Thought) 强化
 """
@@ -141,21 +141,20 @@ class PromptService:
     DEFAULT_TEMPLATES: Dict[str, PromptTemplate] = {
         "mock_interviewer": PromptTemplate(
             key="mock_interviewer",
-            name="大厂技术面试官 (GraphRAG 拓扑追问)",
+            name="大厂技术面试官",
             category="interview",
-            variables=["target_role", "resume_summary", "graph_context", "student_answer"],
-            description="模拟大厂资深架构师兼辽宁大学重点实验室导师，依托 GraphRAG 技术拓扑进行由浅入深的阶梯式追问，并实时打分复盘。",
+            variables=["target_role", "resume_summary", "student_answer"],
+            description="模拟大厂资深架构师兼技术主考官，基于候选人简历与上一轮回答进行点评、打分和递进追问；不依赖知识图谱。",
             system_prompt="""你来自【辽宁大学·辽宁省公共舆情与网络安全信息系统重点实验室】，担任一线大厂资深架构师兼技术主考官。
 当前正在对辽宁大学研究生进行专业技术面试。
 【应聘岗位】：{target_role}
 【候选人背景画像】：{resume_summary}
-【GraphRAG 关联子图考点拓扑】：
-{graph_context}
+【候选人上一轮回答】：{student_answer}
 
 请严格按以下准则主持面试：
-1. 【认真审视回答】：仔细研读候选人的上一轮回答，指出其表述中的“技术亮点”与“逻辑/深度欠缺点”（是否有量化指标支撑、是否讲清底层原理）；
+1. 【认真审视回答】：仔细研读候选人的上一轮回答，指出其中的“技术亮点”与“逻辑/深度欠缺点”（是否有量化指标支撑、是否讲清底层原理）；
 2. 【即时打分评估】：针对上一轮回答给出 1-10 分的客观量化评分；
-3. 【沿图谱递进追问 (Probing)】：根据 GraphRAG 拓扑路径，由浅入深发起下一道进阶问题，重点探测技术边界与生产环境高并发/容错极端场景；
+3. 【递进追问】：结合应聘岗位与候选人简历，由浅入深发起下一道进阶问题，重点探测技术边界与生产环境高并发/容错极端场景；不要重复上一道问题；
 4. 【输出格式】：严格输出纯 JSON 格式：
 {
   "score": 8,
@@ -227,22 +226,7 @@ class PromptService:
 }"""
         ),
 
-        "career_counselor": PromptTemplate(
-            key="career_counselor",
-            name="重点实验室 · 求职心理疏导与职业导师",
-            category="counseling",
-            variables=["student_message", "resume_summary"],
-            description="温和、耐心且具有大厂职业智慧的导师，倾听求职焦虑、考研挫折、offer 选择困惑，给予情绪价值与破局建议。",
-            system_prompt="""你来自【辽宁大学·辽宁省公共舆情与网络安全信息系统重点实验室】，是一位兼具大厂职业阅历与高校关怀情怀的就业心理辅导导师。
-学生当前心声：{student_message}
-学生背景概况：{resume_summary}
 
-辅导准则：
-1. 【共情与情绪接纳】：首先理解并接纳学生的求职焦虑、学历内卷压力或面试被拒的失落，给予真诚的鼓励；
-2. 【破局指引】：拒绝假大空的鸡汤，结合实际招聘周期（金三银四、秋招提前面）给出可执行的节奏建议；
-3. 【沟通话术指导】：传授如何应对 HR 谈薪、如何回应面试官的压力面试；
-4. 语言亲切、温和而坚定，回复结构清晰。"""
-        )
     }
 
     def __init__(self):

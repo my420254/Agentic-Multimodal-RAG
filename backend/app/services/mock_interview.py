@@ -1,10 +1,10 @@
 """
-基于 GraphRAG 技能拓扑树的智能模拟面试与求职心理辅导服务
+智能模拟面试服务
 研发单位：辽宁大学 · 辽宁省公共舆情与网络安全信息系统重点实验室
 核心能力：
-1. 深度集成 GraphRAG 知识图谱引擎，沿前驱后继依赖拓扑进行递进追问 (Probing Questioning)
-2. 支持学生/导师自定义配置面试官人设与心理辅导 Prompt
-3. 交互式实时打分复盘与求职心理闲聊疏导
+1. 基于简历与上一轮回答进行 4 阶递进追问 (Probing Questioning)
+2. 支持学生/导师自定义配置面试官 Prompt
+3. 交互式实时打分复盘与递进追问
 """
 
 import re
@@ -98,63 +98,24 @@ class MockInterviewService:
     async def chat(
         self,
         messages: List[Dict[str, str]],
-        mode: str = "mock_interview",  # "mock_interview" 或 "casual_chat"
+        mode: str = "mock_interview",  # 仅支持 mock_interview
         target_role: str = "AI Agent / 高并发研发工程师",
         resume_summary: str = "",
         custom_prompt: Optional[str] = None,
         *,
         user_id: str,
     ) -> InterviewTurnResponse:
-        """多轮模拟面试或求职心理辅导（提示词按 user_id 隔离）"""
+        """多轮模拟面试（提示词按 user_id 隔离）"""
         if not isinstance(user_id, str) or not user_id.strip():
             raise ValueError("user_id is required and must come from the authenticated token")
+        if mode != "mock_interview":
+            raise ValueError("仅支持 mock_interview 模式；心理疏导请使用智能对话")
 
         last_user_msg = messages[-1]["content"] if messages else "老师好，我准备好了。"
         user_turn_count = len([m for m in messages if m.get("role") == "user"])
 
-        # 1. 心理辅导与日常闲聊模式
-        if mode == "casual_chat":
-            if custom_prompt and custom_prompt.strip():
-                system_prompt = custom_prompt
-            else:
-                system_prompt = prompt_workshop_service.format_prompt(
-                    user_id,
-                    "career_counselor",
-                    student_message=last_user_msg,
-                    resume_summary=resume_summary or "辽宁大学研究生，正在准备实习与秋招"
-                )
-
-            try:
-                llm_response = await self.llm.generate([
-                    {"role": "system", "content": system_prompt},
-                    *messages[-5:]
-                ])
-                return InterviewTurnResponse(
-                    role="mentor",
-                    interviewer_persona="重点实验室就业关怀导师",
-                    reply_text=llm_response,
-                    is_probing=False,
-                    current_stage=ProbingStage.STAGE_1_DESIGN_MOTIVATION,
-                    probing_action=ProbingAction.DEEP_PROBE,
-                    current_skill_focus=None,
-                    recommended_reading=["《程序员求职攻略》", "大厂技术一面通用 STAR 表述范例"]
-                )
-            except Exception as e:
-                logger.warning(f"[MockInterviewService] 闲聊模式 LLM 异常回退: {str(e)}")
-                return InterviewTurnResponse(
-                    role="mentor",
-                    interviewer_persona="重点实验室就业关怀导师",
-                    reply_text="同学别焦虑，求职就像一场马拉松，关键是把自己的技术亮点通过 STAR 法则讲透。无论遇到什么波折，重点实验室永远是你的坚强后盾！随时告诉我你的困惑，我们一起复盘拆解。",
-                    is_probing=False,
-                    current_stage=ProbingStage.STAGE_1_DESIGN_MOTIVATION,
-                    probing_action=ProbingAction.DEEP_PROBE
-                )
-
-        # 2. 技术模拟面试模式 (基于真正图谱子图与自适应 4 阶状态机)
-        subgraph = graphrag_service.search_subgraph(last_user_msg, max_depth=2)
-        active_nodes = [n.name for n in subgraph.nodes]
-        primary_path = subgraph.traversal_paths[0] if subgraph.traversal_paths else "基础概念 -> 底层原理 -> 高并发容错"
-        current_focus = subgraph.nodes[0].name if subgraph.nodes else "高并发架构"
+        # 1. 技术模拟面试模式 (4 阶状态机)
+        current_focus = target_role or "高并发架构"
 
         # 判断用户是否明确表示不会 / 盲区
         is_unknown_signal = any(p in last_user_msg for p in self.UNKNOWN_PATTERNS)
@@ -183,7 +144,6 @@ class MockInterviewService:
                 "mock_interviewer",
                 target_role=target_role,
                 resume_summary=resume_summary or "熟练掌握 Agent 状态机、Hybrid RAG、FastAPI 高并发与 Redis 缓存治理",
-                graph_context=subgraph.graph_context,
                 student_answer=last_user_msg
             )
             system_prompt = f"{base_prompt}\n\n【状态机自适应指导】:\n{stage_guidance}"
@@ -196,7 +156,7 @@ class MockInterviewService:
                 },
                 {
                     "role": "user",
-                    "content": f"系统提示要求与图谱考点上下文：\n{system_prompt}\n\n请针对候选人最新回答进行自适应点评、打分与下一步追问：\n候选人回答：{last_user_msg}"
+                    "content": f"系统提示要求与候选人背景：\n{system_prompt}\n\n请针对候选人最新回答进行自适应点评、打分与下一步追问：\n候选人回答：{last_user_msg}"
                 }
             ])
             match = re.search(r"\{.*\}", raw_res, re.DOTALL)
@@ -232,8 +192,8 @@ class MockInterviewService:
                     feedback=data.get("feedback", "技术概念阐述准确，若能结合容错与度量指标将更具说服力。"),
                     identified_gaps=gaps,
                     identified_strengths=strengths,
-                    graphrag_traversal_path=primary_path,
-                    graphrag_active_nodes=active_nodes,
+                    graphrag_traversal_path=None,
+                    graphrag_active_nodes=[],
                     recommended_reading=data.get("recommended_reading", ["《高性能系统架构设计》", "《分布式技术原理与实战》"])
                 )
         except Exception as e:
@@ -253,8 +213,8 @@ class MockInterviewService:
                 feedback="坦诚认知自己的技术边界是成熟工程师的良好素质；建议在复盘中重点强化该组件的高并发进阶机制。",
                 identified_gaps=[f"{current_focus} 进阶故障容错与极端场景治理"],
                 identified_strengths=[],
-                graphrag_traversal_path=primary_path,
-                graphrag_active_nodes=active_nodes,
+                graphrag_traversal_path=None,
+                graphrag_active_nodes=[],
                 recommended_reading=["《技术核心原理深度剖析》", "《高频技术面试高分答题指南》"]
             )
         else:
@@ -270,8 +230,8 @@ class MockInterviewService:
                 feedback="基础原理阐述清晰，若能在后续回答中突出量化压测数据与边界保护机制，会更具竞争力。",
                 identified_gaps=[],
                 identified_strengths=[f"{current_focus} 核心选型与机制理解准确"],
-                graphrag_traversal_path=primary_path,
-                graphrag_active_nodes=active_nodes,
+                graphrag_traversal_path=None,
+                graphrag_active_nodes=[],
                 recommended_reading=["《大模型 RAG 工业级落地实践》", "《高并发系统限流与降级设计》"]
             )
 

@@ -6,10 +6,12 @@ import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Button, Menu, Typography } from 'antd';
 import {
+  CodeOutlined,
+  CommentOutlined,
   DatabaseOutlined,
+  FileTextOutlined,
   LogoutOutlined,
   MessageOutlined,
-  SettingOutlined,
   RocketOutlined,
   UserOutlined,
 } from '@ant-design/icons';
@@ -23,24 +25,29 @@ type MenuItem = Required<MenuProps>['items'][number];
 
 const menuItems: MenuItem[] = [
   {
-    key: '/career',
-    icon: <RocketOutlined />,
-    label: '智能求职与模拟面试',
+    key: '/career/resume',
+    icon: <FileTextOutlined />,
+    label: '简历诊断',
+  },
+  {
+    key: '/career/interview',
+    icon: <CommentOutlined />,
+    label: '模拟面试',
+  },
+  {
+    key: '/career/prompts',
+    icon: <CodeOutlined />,
+    label: '提示词工坊',
   },
   {
     key: '/kb',
     icon: <DatabaseOutlined />,
-    label: '学生与岗位知识库',
+    label: '知识库',
   },
   {
     key: '/chat',
     icon: <MessageOutlined />,
     label: '智能对话',
-  },
-  {
-    key: '/settings',
-    icon: <SettingOutlined />,
-    label: '系统设置',
   },
 ];
 
@@ -57,11 +64,12 @@ const Sidebar: React.FC = () => {
   // 根据当前路径获取选中的菜单项
   const getSelectedKey = () => {
     const { pathname } = location;
-    if (pathname.startsWith('/career')) return '/career';
+    if (pathname.startsWith('/career/interview')) return '/career/interview';
+    if (pathname.startsWith('/career/prompts')) return '/career/prompts';
+    if (pathname.startsWith('/career')) return '/career/resume';
     if (pathname.startsWith('/kb')) return '/kb';
     if (pathname.startsWith('/chat')) return '/chat';
-    if (pathname.startsWith('/settings')) return '/settings';
-    return '/career';
+    return '/career/resume';
   };
 
   const handleMenuClick: MenuProps['onClick'] = ({ key }) => {

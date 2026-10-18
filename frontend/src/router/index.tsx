@@ -38,7 +38,6 @@ const KnowledgeBaseDetail = lazy(() => import('@/pages/KnowledgeBase/Detail'));
 const ChunkPreview = lazy(() => import('@/pages/KnowledgeBase/ChunkPreview'));
 const MultiFilePreview = lazy(() => import('@/pages/KnowledgeBase/MultiFilePreview'));
 const Chat = lazy(() => import('@/pages/Chat'));
-const Settings = lazy(() => import('@/pages/Settings'));
 const CareerCenter = lazy(() => import('@/pages/CareerCenter'));
 const Login = lazy(() => import('@/pages/Login'));
 
@@ -81,7 +80,7 @@ const router = createBrowserRouter([
     children: [
       {
         index: true,
-        element: <Navigate to="/kb" replace />,
+        element: <Navigate to="/career/resume" replace />,
       },
       {
         path: 'kb',
@@ -130,19 +129,36 @@ const router = createBrowserRouter([
       },
       {
         path: 'career',
-        element: (
-          <LazyComponent>
-            <CareerCenter />
-          </LazyComponent>
-        ),
-      },
-      {
-        path: 'settings',
-        element: (
-          <LazyComponent>
-            <Settings />
-          </LazyComponent>
-        ),
+        children: [
+          {
+            index: true,
+            element: <Navigate to="resume" replace />,
+          },
+          {
+            path: 'resume',
+            element: (
+              <LazyComponent>
+                <CareerCenter tab="resume_doctor" />
+              </LazyComponent>
+            ),
+          },
+          {
+            path: 'interview',
+            element: (
+              <LazyComponent>
+                <CareerCenter tab="interview" />
+              </LazyComponent>
+            ),
+          },
+          {
+            path: 'prompts',
+            element: (
+              <LazyComponent>
+                <CareerCenter tab="prompt_workshop" />
+              </LazyComponent>
+            ),
+          },
+        ],
       },
     ],
   },

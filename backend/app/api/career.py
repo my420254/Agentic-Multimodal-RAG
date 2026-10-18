@@ -52,7 +52,7 @@ class InterviewChatRequest(BaseModel):
     """模拟面试与求职辅导对话请求"""
     session_id: Optional[str] = Field(default=None, description="会话唯一标识(用于三层记忆上下文绑定)")
     messages: List[Dict[str, str]] = Field(description="多轮历史对话消息列表")
-    mode: str = Field(default="mock_interview", description="模式: mock_interview (模拟面试) 或 casual_chat (求职闲聊)")
+    mode: str = Field(default="mock_interview", description="仅支持 mock_interview（模拟面试）")
     target_role: str = Field(default="AI Agent / 后端研发工程师", description="目标应聘岗位")
     resume_summary: str = Field(default="", description="学生简历亮点摘要")
     custom_prompt: Optional[str] = Field(default=None, description="用户自定义生效的系统提示词")
@@ -60,7 +60,7 @@ class InterviewChatRequest(BaseModel):
 
 class UpdatePromptRequest(BaseModel):
     """用户自定义更新提示词请求"""
-    key: str = Field(description="模板键名: mock_interviewer, resume_doctor, star_rewriter, career_counselor")
+    key: str = Field(description="模板键名: mock_interviewer, resume_doctor, star_rewriter")
     system_prompt: str = Field(description="用户修改后的提示词全文")
 
 
@@ -129,8 +129,8 @@ async def interview_chat(
     current_user: User = Depends(get_current_user),
 ):
     """
-    【GraphRAG 智能模拟面试 / 求职心理闲聊】
-    根据技能拓扑图进行由浅入深的递进式追问 (Probing)，并对上一轮回答进行实时打分与复盘
+    【智能模拟面试】
+    基于简历与上一轮回答进行由浅入深的递进式追问 (Probing)，并实时打分复盘
     """
     uid = str(current_user.id)
 
@@ -139,6 +139,8 @@ async def interview_chat(
 
     if not req.messages:
         raise HTTPException(status_code=400, detail="对话消息列表不能为空")
+    if req.mode != "mock_interview":
+        raise HTTPException(status_code=400, detail="仅支持模拟面试模式；心理疏导请使用智能对话")
 
     # 1. 挂接三层分层记忆服务 (MemoryService)
     #    session_id 归属必须来自 token：他人会话与不存在会话统一 404，不泄露存在性。
@@ -234,7 +236,7 @@ async def get_graphrag_subgraph(query: str = "redis"):
 async def get_prompt_templates(current_user: User = Depends(get_current_user)):
     """
     【提示词工坊 - 查看所有模板】
-    查看当前激活的四大提示词：面试官、简历诊断、STAR润色、心理疏导
+    查看当前激活的三大提示词：面试官、简历诊断、STAR润色
     """
     return prompt_workshop_service.get_all_templates(str(current_user.id))
 

@@ -144,21 +144,6 @@ async def test_mock_interview_and_topology():
     assert "追问" in res.reply_text or "深入" in res.reply_text or len(res.reply_text) > 20
 
 
-@pytest.mark.asyncio
-async def test_mock_interview_casual_chat():
-    """测试求职闲聊辅导模式"""
-    messages = [
-        {"role": "user", "content": "老师，我最近投简历总感觉被卡学历或者面试很焦虑，不知道该怎么调适。"}
-    ]
-    res = await mock_interview_service.chat(
-        messages=messages,
-        mode="casual_chat",
-        user_id=f"test_user_{uuid.uuid4().hex[:8]}",
-    )
-    assert res.role == "mentor"
-    assert len(res.reply_text) > 30
-
-
 def test_sliding_window_rate_limiter_1000_qps():
     """测试 1000+ QPS 滑动窗口限流器吞吐与限制保护"""
     limiter = SlidingWindowRateLimiter(limit=10, window_seconds=0.5)

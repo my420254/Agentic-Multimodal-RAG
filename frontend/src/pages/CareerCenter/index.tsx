@@ -3,9 +3,8 @@
  * 研发单位：辽宁大学 · 辽宁省公共舆情与网络安全信息系统重点实验室
  * 核心支柱：
  * 1. 简历严谨诊断与 STAR 针对性优化 (精准挑刺指出痛点、能力雷达与量化重构)
- * 2. GraphRAG 技能拓扑树驱动的递进技术模拟面试 (Probing 追问与实时打分)
- * 3. 求职心理梳理与职业闲聊疏导 (情绪接纳、谈薪话术与抗压指导)
- * 4. 提示词工坊 (用户可自由查看、修改、测试与替换系统提示词)
+ * 2. 大厂技术面试官模拟面试 (逐轮打分 + 递进追问)
+ * 3. 提示词工坊 (用户可自由查看、修改、测试与替换系统提示词)
  */
 
 import React, { useState, useEffect } from 'react';
@@ -26,7 +25,6 @@ import {
   message,
   List,
   Spin,
-  Radio,
   Statistic,
   Select,
   Tooltip
@@ -36,9 +34,7 @@ import {
   CommentOutlined,
   CheckCircleOutlined,
   RocketOutlined,
-  BulbOutlined,
   SendOutlined,
-  BranchesOutlined,
   CodeOutlined,
   ExclamationCircleOutlined,
   UndoOutlined,
@@ -50,8 +46,16 @@ import { authFetch } from '@/services/auth';
 const { TextArea } = Input;
 const { Title, Text, Paragraph } = Typography;
 
-export const CareerCenter: React.FC = () => {
-  const [activeTab, setActiveTab] = useState('resume_doctor');
+interface CareerCenterProps {
+  tab?: 'resume_doctor' | 'interview' | 'prompt_workshop';
+}
+
+export const CareerCenter: React.FC<CareerCenterProps> = ({ tab }) => {
+  const [activeTab, setActiveTab] = useState(tab || 'resume_doctor');
+
+  useEffect(() => {
+    if (tab) setActiveTab(tab);
+  }, [tab]);
 
   // ==================== 1. 简历严谨诊断与 STAR 优化 ====================
   const [resumeText, setResumeText] = useState(
@@ -103,21 +107,16 @@ export const CareerCenter: React.FC = () => {
     }
   };
 
-  // ==================== 2. GraphRAG 模拟面试与心理疏导 ====================
-  const [interviewMode, setInterviewMode] = useState<'mock_interview' | 'casual_chat'>('mock_interview');
+  // ==================== 2. 大厂技术面试官模拟面试 ====================
   const [chatMessages, setChatMessages] = useState<Array<{
     role: string;
     content: string;
     feedback?: string;
     score?: number;
-    graphPath?: string;
-    activeNodes?: string[];
   }>>([
     {
       role: 'interviewer',
-      content: '同学你好！我是辽宁大学重点实验室技术面试官。我看你简历里写到使用 Redis + Lua 脚本实现了滑动窗口限流器并支撑 1000+ QPS。请你结合底层机制谈谈：为什么选择 ZSet 滑动窗口而不是固定窗口计数器？在高并发多实例环境下，Lua 脚本是如何保证原子性以防超买的？',
-      graphPath: 'redis_basics -> cache_breakdown -> redis_lua_limiter',
-      activeNodes: ['Redis 内存数据结构', 'Redis ZSet + Lua 原子滑动窗口限流']
+      content: '同学你好！我是辽宁大学重点实验室技术面试官。我看你简历里写到使用 Redis + Lua 脚本实现了滑动窗口限流器并支撑 1000+ QPS。请你结合底层机制谈谈：为什么选择 ZSet 滑动窗口而不是固定窗口计数器？在高并发多实例环境下，Lua 脚本是如何保证原子性以防超买的？'
     }
   ]);
   const [userInput, setUserInput] = useState('');
@@ -136,7 +135,7 @@ export const CareerCenter: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: newMsgs.map(m => ({ role: m.role, content: m.content })),
-          mode: interviewMode,
+          mode: 'mock_interview',
           target_role: 'AI Agent / 高并发架构工程师',
           resume_summary: '辽宁大学硕士，熟练掌握 Agent 状态机、Hybrid RAG、FastAPI 高并发与 Redis 限流'
         })
@@ -149,9 +148,7 @@ export const CareerCenter: React.FC = () => {
           role: data.role,
           content: data.reply_text,
           feedback: data.feedback,
-          score: data.score_for_last_answer,
-          graphPath: data.graphrag_traversal_path,
-          activeNodes: data.graphrag_active_nodes
+          score: data.score_for_last_answer
         }
       ]);
     } catch (err: any) {
@@ -238,15 +235,15 @@ export const CareerCenter: React.FC = () => {
             高校智能求职面试辅导与简历优化 Agent 平台
           </Title>
           <Text type="secondary">
-            研发生态：辽宁大学 · 辽宁省公共舆情与网络安全信息系统重点实验室 | 基于 GraphRAG 技能图谱推理、大厂 TL 简历诊断与自定义提示词工程
+            研发生态：辽宁大学 · 辽宁省公共舆情与网络安全信息系统重点实验室 | 大厂 TL 简历诊断、模拟面试与自定义提示词工程
           </Text>
         </Space>
       </div>
 
       <Tabs
         activeKey={activeTab}
-        onChange={setActiveTab}
         type="card"
+        tabBarStyle={{ display: 'none' }}
         items={[
           {
             key: 'resume_doctor',
@@ -417,36 +414,12 @@ export const CareerCenter: React.FC = () => {
           },
           {
             key: 'interview',
-            label: (
-              <span>
-                <BranchesOutlined /> GraphRAG 技术模拟面试 & 心理疏导
-              </span>
-            ),
+            label: <span>模拟面试</span>,
             children: (
               <div>
-                <Row gutter={16} style={{ marginBottom: 16 }} align="middle">
-                  <Col span={12}>
-                    <Radio.Group
-                      value={interviewMode}
-                      onChange={e => setInterviewMode(e.target.value)}
-                      buttonStyle="solid"
-                    >
-                      <Radio.Button value="mock_interview">
-                        <BranchesOutlined /> GraphRAG 技能拓扑递进模拟面试
-                      </Radio.Button>
-                      <Radio.Button value="casual_chat">
-                        <BulbOutlined /> 重点实验室就业导师心理梳理与闲聊
-                      </Radio.Button>
-                    </Radio.Group>
-                  </Col>
-                  <Col span={12} style={{ textAlign: 'right' }}>
-                    <Tag color="cyan">
-                      {interviewMode === 'mock_interview'
-                        ? '依托 GraphRAG 实体链路多跳推理'
-                        : '重点实验室关怀模式 · 情绪接纳与谈薪话术'}
-                    </Tag>
-                  </Col>
-                </Row>
+                <div style={{ marginBottom: 16 }}>
+                  <Tag color="cyan">大厂技术面试官 · 逐轮打分与递进追问</Tag>
+                </div>
 
                 <Card
                   bodyStyle={{ height: '480px', overflowY: 'auto', padding: '16px' }}
@@ -472,17 +445,11 @@ export const CareerCenter: React.FC = () => {
                         }}
                       >
                         <div style={{ fontWeight: 'bold', marginBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span>{msg.role === 'user' ? '候选人 (同学)' : (interviewMode === 'mock_interview' ? '大厂技术考官' : '就业心理关怀导师')}</span>
+                          <span>{msg.role === 'user' ? '候选人 (同学)' : '大厂技术面试官'}</span>
                           {msg.score && <Tag color="green">{msg.score} 分</Tag>}
                         </div>
                         <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
 
-                        {msg.graphPath && (
-                          <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px dashed #d9d9d9', fontSize: 12, color: '#096dd9' }}>
-                            <BranchesOutlined style={{ marginRight: 4 }} />
-                            GraphRAG 推理路径: {msg.graphPath}
-                          </div>
-                        )}
                       </div>
 
                       {msg.feedback && (
@@ -498,7 +465,7 @@ export const CareerCenter: React.FC = () => {
                   ))}
                   {interviewLoading && (
                     <div style={{ textAlign: 'center', padding: '10px' }}>
-                      <Spin tip="考官正在基于 GraphRAG 技能拓扑树组织多跳追问..." />
+                      <Spin tip="面试官正在点评并准备下一问..." />
                     </div>
                   )}
                 </Card>
@@ -514,11 +481,7 @@ export const CareerCenter: React.FC = () => {
                         handleSendChat();
                       }
                     }}
-                    placeholder={
-                      interviewMode === 'mock_interview'
-                        ? '请输入你的技术回答（可从高并发痛点、底层机制与量化指标深入阐述）...'
-                        : '向导师倾诉求职中的困惑、考研调剂心路、面试失利挫折感或薪资谈判问题...'
-                    }
+                    placeholder="请输入你的技术回答（可从高并发痛点、底层机制与量化指标深入阐述）..."
                   />
                   <Button
                     type="primary"
@@ -545,7 +508,7 @@ export const CareerCenter: React.FC = () => {
               <div>
                 <Alert
                   message="用户自主提示词工程工坊 (Prompt Workshop)"
-                  description="拒绝死板黑盒！用户可自由查看、修改并在线重写系统的 4 大黄金提示词。保存后将即刻作用于模拟面试、简历诊断与心理辅导中。"
+                  description="拒绝死板黑盒！用户可自由查看、修改并在线重写系统的 3 大提示词：模拟面试、简历诊断、STAR 润色。保存后即刻生效。"
                   type="success"
                   showIcon
                   style={{ marginBottom: 16 }}

@@ -12,7 +12,6 @@ import {
   ReloadOutlined,
   LinkOutlined,
   RobotOutlined,
-  MessageOutlined,
   SettingOutlined,
   DeleteOutlined,
   QuestionCircleOutlined,
@@ -85,7 +84,7 @@ const Chat: React.FC = () => {
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
 
   // 模式状态
-  const [chatMode, setChatMode] = useState<'normal' | 'agent'>('agent');
+  const [chatMode] = useState<'normal' | 'agent'>('agent');
   
   // 当前模式的衍生状态
   const isGenerating = chatMode === 'normal' ? isNormalGenerating : isAgentGenerating;
@@ -719,18 +718,9 @@ const Chat: React.FC = () => {
     <div className={styles.container}>
       <PageHeader
         title="智能对话"
-        subtitle="基于知识库的智能问答"
+        subtitle="Agent 自主检索、重排与回答"
         onBack={() => navigate(-1)}
-        extra={
-          <Segmented
-            value={chatMode}
-            onChange={(value) => setChatMode(value as 'normal' | 'agent')}
-            options={[
-              { label: 'Agent 模式', value: 'agent', icon: <RobotOutlined /> },
-              { label: '普通模式', value: 'normal', icon: <MessageOutlined /> },
-            ]}
-          />
-        }
+        extra={<Tag color="blue">Agent 智能问答</Tag>}
       />
 
       {/* 配置区 */}
