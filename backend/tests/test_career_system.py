@@ -3,6 +3,8 @@
 研发单位：辽宁大学 · 辽宁省公共舆情与网络安全信息系统重点实验室
 """
 
+import uuid
+
 import pytest
 from httpx import AsyncClient
 from app.main import app
@@ -133,7 +135,8 @@ async def test_mock_interview_and_topology():
     res = await mock_interview_service.chat(
         messages=messages,
         mode="mock_interview",
-        target_role="高并发后端研发工程师"
+        target_role="高并发后端研发工程师",
+        user_id=f"test_user_{uuid.uuid4().hex[:8]}",
     )
     assert res.role == "interviewer"
     assert res.score_for_last_answer is not None
@@ -149,7 +152,8 @@ async def test_mock_interview_casual_chat():
     ]
     res = await mock_interview_service.chat(
         messages=messages,
-        mode="casual_chat"
+        mode="casual_chat",
+        user_id=f"test_user_{uuid.uuid4().hex[:8]}",
     )
     assert res.role == "mentor"
     assert len(res.reply_text) > 30
@@ -166,8 +170,8 @@ def test_sliding_window_rate_limiter_1000_qps():
     assert passed_count == 10
 
 
-def test_career_api_endpoints(client):
-    """测试 FastAPI Career 相关对外 REST 接口"""
+def test_career_api_endpoints(client, auth_headers):
+    """测试 FastAPI Career 相关对外 REST 接口（W1 起必须带 access token）"""
     # 1. 虚假岗位检测接口
     fraud_resp = client.post(
         "/api/v1/career/fraud-check",
@@ -176,7 +180,8 @@ def test_career_api_endpoints(client):
             "company": "测试机构",
             "job_description": "高薪入职，前三个月自费缴纳实训费 12000 元参加岗前技能提升。",
             "deep_audit": False
-        }
+        },
+        headers=auth_headers,
     )
     assert fraud_resp.status_code == 200
     fraud_data = fraud_resp.json()
@@ -188,7 +193,8 @@ def test_career_api_endpoints(client):
         json={
             "resume_text": "熟练掌握 Python, FastAPI, Docker, Redis",
             "jd_text": "要求熟练掌握 Python 和 Redis"
-        }
+        },
+        headers=auth_headers,
     )
     assert match_resp.status_code == 200
     match_data = match_resp.json()
@@ -196,7 +202,7 @@ def test_career_api_endpoints(client):
     assert "radar_chart" in match_data
 
     # 3. 技能图谱接口
-    graph_resp = client.get("/api/v1/career/skill-graph")
+    graph_resp = client.get("/api/v1/career/skill-graph", headers=auth_headers)
     assert graph_resp.status_code == 200
     graph_data = graph_resp.json()
     assert len(graph_data["nodes"]) > 0
@@ -208,7 +214,8 @@ def test_career_api_endpoints(client):
             "messages": [{"role": "user", "content": "我对 FastAPI 异步机制比较熟悉。"}],
             "mode": "mock_interview",
             "target_role": "后端开发"
-        }
+        },
+        headers=auth_headers,
     )
     assert interview_resp.status_code == 200
     turn_data = interview_resp.json()
@@ -216,14 +223,17 @@ def test_career_api_endpoints(client):
     assert "graphrag_traversal_path" in turn_data
 
     # 5. 提示词工坊接口
-    prompts_resp = client.get("/api/v1/career/prompts")
+    prompts_resp = client.get("/api/v1/career/prompts", headers=auth_headers)
     assert prompts_resp.status_code == 200
     prompts_data = prompts_resp.json()
     assert "mock_interviewer" in prompts_data
     assert "resume_doctor" in prompts_data
 
     # 6. GraphRAG 子图多跳检索接口
-    subgraph_resp = client.get("/api/v1/career/graphrag/subgraph?query=redis")
+    subgraph_resp = client.get(
+        "/api/v1/career/graphrag/subgraph?query=redis",
+        headers=auth_headers,
+    )
     assert subgraph_resp.status_code == 200
     subgraph_data = subgraph_resp.json()
     assert len(subgraph_data["nodes"]) > 0
@@ -240,16 +250,19 @@ def test_graphrag_subgraph_traversal():
 
 
 def test_prompt_workshop_custom_update():
-    """测试提示词工坊用户自定义修改与重置"""
+    """测试提示词工坊用户自定义修改与重置（按用户隔离）"""
     from app.services.prompt_service import prompt_workshop_service
+    test_user = f"test_user_{uuid.uuid4().hex[:8]}"
     # 1. 更新提示词
     custom_content = "你是一个更加严肃的大厂 P9 面试官。"
-    updated = prompt_workshop_service.update_template("mock_interviewer", custom_content)
+    updated = prompt_workshop_service.update_template(
+        test_user, "mock_interviewer", custom_content
+    )
     assert updated.is_custom is True
     assert updated.system_prompt == custom_content
 
     # 2. 恢复默认
-    reset_tpl = prompt_workshop_service.reset_template("mock_interviewer")
+    reset_tpl = prompt_workshop_service.reset_template(test_user, "mock_interviewer")
     assert reset_tpl.is_custom is False
     assert "辽宁大学" in reset_tpl.system_prompt
 
@@ -263,7 +276,8 @@ async def test_mock_interview_adaptive_fallback_on_unknown():
             {"role": "user", "content": "关于 Redis 缓存一致性和双写延迟，我在学校项目里没接触过，不太清楚底层细节。"}
         ],
         mode="mock_interview",
-        target_role="高并发后端开发"
+        target_role="高并发后端开发",
+        user_id=f"test_user_{uuid.uuid4().hex[:8]}",
     )
     assert res.probing_action == ProbingAction.PIVOT_FALLBACK
     assert res.is_probing is True
@@ -281,7 +295,8 @@ async def test_mock_interview_adaptive_advance_on_confident_answer():
             {"role": "user", "content": "我使用了 Redis ZSet 实现滑动窗口限流器，通过 Lua 脚本原子性执行 zremrangebyscore 和 zcard，有效避免了超卖。"}
         ],
         mode="mock_interview",
-        target_role="高并发后端开发"
+        target_role="高并发后端开发",
+        user_id=f"test_user_{uuid.uuid4().hex[:8]}",
     )
     assert res.probing_action == ProbingAction.DEEP_PROBE
     assert res.score_for_last_answer is not None and res.score_for_last_answer >= 6

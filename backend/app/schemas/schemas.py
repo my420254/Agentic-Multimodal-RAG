@@ -218,7 +218,7 @@ class ChatRequest(BaseModel):
     context_window: int = 1  # 上下文窗口大小
     # 记忆与会话上下文
     session_id: Optional[str] = None
-    user_id: Optional[str] = "default_user"
+    # 注意：user_id 不在这里。身份只从 Authorization: Bearer 取，body 里的 user_id 一律忽略。
 
 
 # ==================== SSE 事件 ====================

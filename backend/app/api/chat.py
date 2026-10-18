@@ -9,7 +9,8 @@ from typing import AsyncGenerator
 import json
 
 from app.core.database import get_session
-from app.models import KnowledgeBase
+from app.core.deps import get_current_user
+from app.models import KnowledgeBase, User
 from app.schemas import (
     RewriteRequest,
     RewriteResponse,
@@ -18,12 +19,16 @@ from app.schemas import (
 )
 from app.services.chat import ChatService
 from app.services.llm import LLMService
+from app.services.memory_service import memory_service
 
 router = APIRouter(tags=["Chat"])
 
 
 @router.post("/chat/rewrite", response_model=ApiResponse[RewriteResponse])
-async def rewrite_query(data: RewriteRequest):
+async def rewrite_query(
+    data: RewriteRequest,
+    current_user: User = Depends(get_current_user),
+):
     """问题改写"""
     try:
         llm_service = LLMService()
@@ -40,6 +45,7 @@ async def rewrite_query(data: RewriteRequest):
 async def chat_completions(
     data: ChatRequest,
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """对话接口 (SSE 流式响应)"""
     # 验证知识库存在
@@ -50,6 +56,16 @@ async def chat_completions(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"code": 40401, "message": f"知识库不存在: {kb_id}"},
             )
+
+    # 身份只来自 token。body/query 里的任何 user_id 都不参与判定。
+    uid = str(current_user.id)
+
+    # 会话归属必须来自 token：新会话允许认领，他人会话统一 404。
+    if data.session_id and not memory_service.claim_session(uid, data.session_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": 40402, "message": "会话不存在"},
+        )
 
     async def generate_sse() -> AsyncGenerator[str, None]:
         """生成 SSE 事件流"""
@@ -74,7 +90,7 @@ async def chat_completions(
                 rerank_top_k=data.rerank_top_k,
                 context_window=data.context_window,
                 session_id=data.session_id,
-                user_id=data.user_id,
+                user_id=uid,
             ):
                 # 格式化 SSE 事件
                 yield f"event: {event_type}\n"

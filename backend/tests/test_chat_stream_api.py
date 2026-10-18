@@ -3,10 +3,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 
-def test_chat_rewrite_api(client: TestClient):
-    """测试问题改写接口"""
+def test_chat_rewrite_api(client: TestClient, auth_headers: dict):
+    """测试问题改写接口（W1 起必须带 access token）"""
     payload = {"query": "那个 137 报错是什么原因？"}
-    response = client.post("/api/v1/chat/rewrite", json=payload)
+    response = client.post("/api/v1/chat/rewrite", json=payload, headers=auth_headers)
     assert response.status_code == 200
     res_data = response.json()
     assert res_data["code"] == 200
@@ -14,18 +14,22 @@ def test_chat_rewrite_api(client: TestClient):
     assert len(res_data["data"]["rewritten_query"]) > 0
 
 
-def test_chat_completions_kb_not_found(client: TestClient):
+def test_chat_completions_kb_not_found(client: TestClient, auth_headers: dict):
     """测试请求不存在的知识库时严格返回 404"""
     payload = {
         "messages": [{"role": "user", "content": "测试问题"}],
         "kb_ids": ["non_existent_kb_12345"],
         "stream": True,
     }
-    response = client.post("/api/v1/chat/completions", json=payload)
+    response = client.post("/api/v1/chat/completions", json=payload, headers=auth_headers)
     assert response.status_code == 404
 
 
-def test_chat_completions_streaming_sse(client: TestClient, enterprise_kb_id: str):
+def test_chat_completions_streaming_sse(
+    client: TestClient,
+    enterprise_kb_id: str,
+    auth_headers: dict,
+):
     """测试真实生产 SRE 故障问答的 SSE 流式输出完整性"""
     payload = {
         "messages": [
@@ -34,7 +38,12 @@ def test_chat_completions_streaming_sse(client: TestClient, enterprise_kb_id: st
         "kb_ids": [enterprise_kb_id],
         "stream": True,
     }
-    with client.stream("POST", "/api/v1/chat/completions", json=payload) as response:
+    with client.stream(
+        "POST",
+        "/api/v1/chat/completions",
+        json=payload,
+        headers=auth_headers,
+    ) as response:
         assert response.status_code == 200
         assert "text/event-stream" in response.headers["content-type"]
         

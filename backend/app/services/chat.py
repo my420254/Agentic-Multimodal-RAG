@@ -234,7 +234,8 @@ class ChatService:
         context_window: int = 1,
         use_rewrite: bool = False,
         session_id: str = None,
-        user_id: str = "default_user",
+        *,
+        user_id: str,
     ) -> AsyncGenerator[Tuple[str, Dict[str, Any]], None]:
         """
         普通模式：
@@ -258,7 +259,7 @@ class ChatService:
         # 写入 L1 短期活跃记忆
         if session_id:
             try:
-                self.memory_service.add_message(session_id, "user", user_message)
+                self.memory_service.add_message(user_id, session_id, "user", user_message)
             except Exception as e:
                 print(f"DEBUG_MEMORY: Write L1 memory failed: {e}")
 
@@ -423,7 +424,7 @@ class ChatService:
 
         # 2. 提示词工程：动态组装包含角色定义、CoT、XML上下文强隔离、动态Few-Shot与分层记忆的生产提示词
         user_prof = self.memory_service.get_user_profile(user_id) if session_id else None
-        conv_sum = self.memory_service.get_summary(session_id) if session_id else None
+        conv_sum = self.memory_service.get_summary(user_id, session_id) if session_id else None
         system_prompt = prompt_service.build_system_prompt(
             rag_context=context,
             user_query=user_message,
@@ -484,8 +485,8 @@ class ChatService:
         if session_id and accumulated_chunks:
             full_reply = "".join(accumulated_chunks)
             try:
-                self.memory_service.add_message(session_id, "assistant", full_reply)
-                self.memory_service.update_summary_if_needed(session_id, current_llm_service)
+                self.memory_service.add_message(user_id, session_id, "assistant", full_reply)
+                self.memory_service.update_summary_if_needed(user_id, session_id, current_llm_service)
             except Exception as e:
                 print(f"DEBUG_MEMORY: Update L1/L2 memory failed: {e}")
 
@@ -512,7 +513,11 @@ class ChatService:
         """
         from app.services.agent_workflow import AgentWorkflow
         from langchain_core.messages import HumanMessage, AIMessage
-        
+
+        user_id = kwargs.get("user_id")
+        if not isinstance(user_id, str) or not user_id.strip():
+            raise ValueError("user_id is required and must come from the authenticated token")
+
         # 1. 初始化 Workflow
         workflow = AgentWorkflow()
         
@@ -592,7 +597,7 @@ class ChatService:
             last_human = [m.content for m in langchain_messages if isinstance(m, HumanMessage)]
             if last_human:
                 try:
-                    self.memory_service.add_message(session_id, "user", str(last_human[-1]))
+                    self.memory_service.add_message(user_id, session_id, "user", str(last_human[-1]))
                 except Exception as e:
                     print(f"DEBUG_MEMORY: Write L1 memory in langgraph failed: {e}")
         
@@ -677,8 +682,8 @@ class ChatService:
         if session_id and accumulated_chunks:
             full_reply = "".join(accumulated_chunks)
             try:
-                self.memory_service.add_message(session_id, "assistant", full_reply)
-                self.memory_service.update_summary_if_needed(session_id, self.llm_service)
+                self.memory_service.add_message(user_id, session_id, "assistant", full_reply)
+                self.memory_service.update_summary_if_needed(user_id, session_id, self.llm_service)
             except Exception as e:
                 print(f"DEBUG_MEMORY: Update L1/L2 memory in agent mode failed: {e}")
             
@@ -702,7 +707,8 @@ class ChatService:
         rerank_top_k: int = 20,
         context_window: int = 1,
         session_id: str = None,
-        user_id: str = "default_user",
+        *,
+        user_id: str,
     ) -> AsyncGenerator[Tuple[str, Dict[str, Any]], None]:
         """
         流式对话

@@ -101,9 +101,14 @@ class MockInterviewService:
         mode: str = "mock_interview",  # "mock_interview" 或 "casual_chat"
         target_role: str = "AI Agent / 高并发研发工程师",
         resume_summary: str = "",
-        custom_prompt: Optional[str] = None
+        custom_prompt: Optional[str] = None,
+        *,
+        user_id: str,
     ) -> InterviewTurnResponse:
-        """多轮模拟面试或求职心理辅导"""
+        """多轮模拟面试或求职心理辅导（提示词按 user_id 隔离）"""
+        if not isinstance(user_id, str) or not user_id.strip():
+            raise ValueError("user_id is required and must come from the authenticated token")
+
         last_user_msg = messages[-1]["content"] if messages else "老师好，我准备好了。"
         user_turn_count = len([m for m in messages if m.get("role") == "user"])
 
@@ -113,6 +118,7 @@ class MockInterviewService:
                 system_prompt = custom_prompt
             else:
                 system_prompt = prompt_workshop_service.format_prompt(
+                    user_id,
                     "career_counselor",
                     student_message=last_user_msg,
                     resume_summary=resume_summary or "辽宁大学研究生，正在准备实习与秋招"
@@ -173,6 +179,7 @@ class MockInterviewService:
             system_prompt = f"{custom_prompt}\n\n【状态机自适应指导】:\n{stage_guidance}"
         else:
             base_prompt = prompt_workshop_service.format_prompt(
+                user_id,
                 "mock_interviewer",
                 target_role=target_role,
                 resume_summary=resume_summary or "熟练掌握 Agent 状态机、Hybrid RAG、FastAPI 高并发与 Redis 缓存治理",

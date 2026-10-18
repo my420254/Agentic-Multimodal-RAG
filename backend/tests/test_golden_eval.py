@@ -103,21 +103,21 @@ def test_golden_memory_cross_user_isolation():
     try:
         # 1. 模拟用户 A 偏好写入 (Go 语言微服务)
         memory_service.set_user_preference(user_a, "target_language", "GoFrame / Gin")
-        memory_service.add_message(session_a, "user", "我的主修方向是 Go 语言微服务与 Kafka。")
+        memory_service.add_message(user_a, session_a, "user", "我的主修方向是 Go 语言微服务与 Kafka。")
 
         # 2. 模拟用户 B 偏好写入 (Python 深度学习)
         memory_service.set_user_preference(user_b, "target_language", "Python PyTorch")
-        memory_service.add_message(session_b, "user", "我的主修方向是 Python NLP 算法。")
+        memory_service.add_message(user_b, session_b, "user", "我的主修方向是 Python NLP 算法。")
 
         # 3. 校验用户 A 的画像与上下文
-        ctx_a = memory_service.assemble_context_for_prompt(session_a, user_id=user_a)
+        ctx_a = memory_service.assemble_context_for_prompt(user_id=user_a, session_id=session_a)
         assert "GoFrame" in ctx_a["profile_text"]
         assert "PyTorch" not in ctx_a["profile_text"]
         assert any("Go 语言微服务" in m["content"] for m in ctx_a["recent_messages"])
         assert not any("PyTorch" in m["content"] for m in ctx_a["recent_messages"])
 
         # 4. 校验用户 B 的画像与上下文
-        ctx_b = memory_service.assemble_context_for_prompt(session_b, user_id=user_b)
+        ctx_b = memory_service.assemble_context_for_prompt(user_id=user_b, session_id=session_b)
         assert "PyTorch" in ctx_b["profile_text"]
         assert "GoFrame" not in ctx_b["profile_text"]
         assert any("Python NLP" in m["content"] for m in ctx_b["recent_messages"])
@@ -125,8 +125,8 @@ def test_golden_memory_cross_user_isolation():
 
     finally:
         # 清理测试状态
-        memory_service.clear_session(session_a)
-        memory_service.clear_session(session_b)
+        memory_service.clear_session(user_a, session_a)
+        memory_service.clear_session(user_b, session_b)
 
 
 @pytest.mark.asyncio
@@ -137,7 +137,8 @@ async def test_golden_agent_adaptive_interview_loop():
     # 阶段 1：候选人表明盲区
     res_turn1 = await mock_interview_service.chat(
         messages=[{"role": "user", "content": "关于 Redis 分布式锁看门狗和红锁算法，我平时在实验室单机开发没接触过，不太了解。"}],
-        mode="mock_interview"
+        mode="mock_interview",
+        user_id="golden_eval_user",
     )
     assert res_turn1.probing_action == ProbingAction.PIVOT_FALLBACK
     assert len(res_turn1.identified_gaps) >= 1
@@ -151,7 +152,8 @@ async def test_golden_agent_adaptive_interview_loop():
             {"role": "assistant", "content": res_turn1.reply_text},
             {"role": "user", "content": "Redis 核心数据结构有 String、Hash、List、Set、ZSet。String 底层使用 SDS（简单动态字符串），空间预分配并杜绝缓冲区溢出；ZSet 在元素较多时采用 Skiplist 跳表，相较于平衡树/红黑树，跳表在范围查询（ZRANGEBYSCORE）时能沿链表水平扫描，不仅时间复杂度为 O(log N)，而且实现更简单、内存局部性更好。"}
         ],
-        mode="mock_interview"
+        mode="mock_interview",
+        user_id="golden_eval_user",
     )
     assert res_turn2.probing_action == ProbingAction.DEEP_PROBE
     assert res_turn2.score_for_last_answer is not None and res_turn2.score_for_last_answer >= 6

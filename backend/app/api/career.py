@@ -16,8 +16,14 @@ from app.services.graphrag_service import graphrag_service
 from app.services.prompt_service import prompt_workshop_service
 from app.services.parser import FileParser
 from app.core.rate_limiter import global_rate_limiter
+from app.core.deps import get_current_user
+from app.models import User
 
-router = APIRouter(prefix="/career", tags=["Career & Interview Agent"])
+router = APIRouter(
+    prefix="/career",
+    tags=["Career & Interview Agent"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 class JobFraudCheckRequest(BaseModel):
@@ -45,7 +51,6 @@ from app.services.memory_service import memory_service
 class InterviewChatRequest(BaseModel):
     """模拟面试与求职辅导对话请求"""
     session_id: Optional[str] = Field(default=None, description="会话唯一标识(用于三层记忆上下文绑定)")
-    user_id: Optional[str] = Field(default="default_student", description="用户唯一标识(用于长期偏好隔离)")
     messages: List[Dict[str, str]] = Field(description="多轮历史对话消息列表")
     mode: str = Field(default="mock_interview", description="模式: mock_interview (模拟面试) 或 casual_chat (求职闲聊)")
     target_role: str = Field(default="AI Agent / 后端研发工程师", description="目标应聘岗位")
@@ -119,11 +124,16 @@ async def parse_resume_text(req: ResumeParseRequest):
 
 
 @router.post("/interview/chat", response_model=InterviewTurnResponse)
-async def interview_chat(req: InterviewChatRequest):
+async def interview_chat(
+    req: InterviewChatRequest,
+    current_user: User = Depends(get_current_user),
+):
     """
     【GraphRAG 智能模拟面试 / 求职心理闲聊】
     根据技能拓扑图进行由浅入深的递进式追问 (Probing)，并对上一轮回答进行实时打分与复盘
     """
+    uid = str(current_user.id)
+
     if not global_rate_limiter.is_allowed("interview_chat"):
         raise HTTPException(status_code=429, detail="请求并发超限，请稍后重试")
 
@@ -131,12 +141,19 @@ async def interview_chat(req: InterviewChatRequest):
         raise HTTPException(status_code=400, detail="对话消息列表不能为空")
 
     # 1. 挂接三层分层记忆服务 (MemoryService)
+    #    session_id 归属必须来自 token：他人会话与不存在会话统一 404，不泄露存在性。
     augmented_summary = req.resume_summary
     if req.session_id:
+        if not memory_service.claim_session(uid, req.session_id):
+            raise HTTPException(status_code=404, detail="会话不存在")
+
         last_msg = req.messages[-1]["content"] if req.messages else ""
-        memory_service.add_message(req.session_id, "user", last_msg)
+        memory_service.add_message(uid, req.session_id, "user", last_msg)
         # 获取 L3 长期偏好与 L2 滚动摘要
-        mem_ctx = memory_service.assemble_context_for_prompt(req.session_id, user_id=req.user_id)
+        mem_ctx = memory_service.assemble_context_for_prompt(
+            user_id=uid,
+            session_id=req.session_id,
+        )
         context_parts = [req.resume_summary]
         if mem_ctx.get("profile_text"):
             context_parts.append(mem_ctx["profile_text"])
@@ -149,32 +166,48 @@ async def interview_chat(req: InterviewChatRequest):
         mode=req.mode,
         target_role=req.target_role,
         resume_summary=augmented_summary,
-        custom_prompt=req.custom_prompt
+        custom_prompt=req.custom_prompt,
+        user_id=uid,
     )
 
-    # 2. 记忆落库
+    # 2. 记忆落库（同上，永远写当前 token 用户的空间）
     if req.session_id:
-        memory_service.add_message(req.session_id, "assistant", turn_response.reply_text)
+        memory_service.add_message(uid, req.session_id, "assistant", turn_response.reply_text)
 
     return turn_response
 
 
 @router.get("/interview/session/{session_id}/memory")
-async def get_session_memory(session_id: str, user_id: str = "default_student"):
+async def get_session_memory(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+):
     """
     【三层分层记忆查看】
     实时读取指定会话的 L1 活跃消息、L2 滚动摘要及 L3 长期画像
     """
-    return memory_service.assemble_context_for_prompt(session_id=session_id, user_id=user_id)
+    uid = str(current_user.id)
+    if not memory_service.owns_session(uid, session_id):
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return memory_service.assemble_context_for_prompt(
+        user_id=uid,
+        session_id=session_id,
+    )
 
 
 @router.delete("/interview/session/{session_id}")
-async def clear_session_memory(session_id: str):
+async def clear_session_memory(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+):
     """
     【清空会话记忆】
     清空指定会话的 L1 临时消息与 L2 增量摘要
     """
-    memory_service.clear_session(session_id)
+    uid = str(current_user.id)
+    if not memory_service.owns_session(uid, session_id):
+        raise HTTPException(status_code=404, detail="会话不存在")
+    memory_service.clear_session(uid, session_id)
     return {"message": f"会话 {session_id} 的全部记忆缓存已成功清除"}
 
 
@@ -198,34 +231,44 @@ async def get_graphrag_subgraph(query: str = "redis"):
 
 
 @router.get("/prompts")
-async def get_prompt_templates():
+async def get_prompt_templates(current_user: User = Depends(get_current_user)):
     """
     【提示词工坊 - 查看所有模板】
     查看当前激活的四大提示词：面试官、简历诊断、STAR润色、心理疏导
     """
-    return prompt_workshop_service.get_all_templates()
+    return prompt_workshop_service.get_all_templates(str(current_user.id))
 
 
 @router.post("/prompts")
-async def update_prompt_template(req: UpdatePromptRequest):
+async def update_prompt_template(
+    req: UpdatePromptRequest,
+    current_user: User = Depends(get_current_user),
+):
     """
     【提示词工坊 - 用户自定义修改】
     允许用户在线重写/定制提示词并立即生效
     """
     try:
-        updated = prompt_workshop_service.update_template(req.key, req.system_prompt)
+        updated = prompt_workshop_service.update_template(
+            str(current_user.id), req.key, req.system_prompt
+        )
         return {"status": "ok", "template": updated}
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.post("/prompts/reset")
-async def reset_prompt_template(req: ResetPromptRequest):
+async def reset_prompt_template(
+    req: ResetPromptRequest,
+    current_user: User = Depends(get_current_user),
+):
     """
     【提示词工坊 - 恢复默认提示词】
     """
     try:
-        reset_tpl = prompt_workshop_service.reset_template(req.key)
+        reset_tpl = prompt_workshop_service.reset_template(
+            str(current_user.id), req.key
+        )
         return {"status": "ok", "template": reset_tpl}
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))

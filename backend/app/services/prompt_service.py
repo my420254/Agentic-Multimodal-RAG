@@ -9,10 +9,16 @@
 
 import re
 import logging
+import threading
 from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field
 
+import redis
+
+from app.core.config import get_settings
+
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 
 
@@ -27,8 +33,110 @@ class PromptTemplate(BaseModel):
     is_custom: bool = Field(default=False, description="是否已被用户自定义修改")
 
 
+class PromptOverrideStore:
+    """
+    按用户隔离的提示词覆盖存储。
+
+    - Redis Hash key: u:{uid}:prompts，field=模板 key，value=用户改写后的 system_prompt；
+    - 默认模板仍然来自代码常量 PromptService.DEFAULT_TEMPLATES；
+    - 本对象不保存“当前激活模板”这类跨用户可变的全局状态。
+    """
+
+    def __init__(self, redis_url: Optional[str] = None):
+        self.redis_url = redis_url or settings.REDIS_URL
+        self._redis_client: Optional[redis.Redis] = None
+        self._fallback: Dict[str, Dict[str, str]] = {}
+        self._lock = threading.RLock()
+
+    @property
+    def client(self) -> Optional[redis.Redis]:
+        if self._redis_client is None:
+            try:
+                pool = redis.ConnectionPool.from_url(
+                    self.redis_url,
+                    decode_responses=True,
+                    socket_connect_timeout=2,
+                    socket_timeout=2,
+                    max_connections=10,
+                )
+                r = redis.Redis(connection_pool=pool)
+                r.ping()
+                self._redis_client = r
+            except Exception as e:
+                logger.warning(
+                    "⚠️ [PromptService] Redis 无法连接 (%s)，提示词自定义降级为进程内存",
+                    str(e),
+                )
+                self._redis_client = None
+        return self._redis_client
+
+    @staticmethod
+    def _require_user_id(user_id: str) -> str:
+        if not isinstance(user_id, str) or not user_id.strip():
+            raise ValueError("user_id is required and must come from the authenticated token")
+        return user_id.strip()
+
+    @staticmethod
+    def _key(user_id: str) -> str:
+        return f"u:{user_id}:prompts"
+
+    def get_all(self, user_id: str) -> Dict[str, str]:
+        uid = self._require_user_id(user_id)
+        key = self._key(uid)
+        r = self.client
+        if r:
+            try:
+                return r.hgetall(key) or {}
+            except Exception as e:
+                logger.error("Redis hgetall prompts 失败: %s", e)
+
+        with self._lock:
+            return dict(self._fallback.get(key, {}))
+
+    def get(self, user_id: str, template_key: str) -> Optional[str]:
+        uid = self._require_user_id(user_id)
+        key = self._key(uid)
+        r = self.client
+        if r:
+            try:
+                return r.hget(key, template_key)
+            except Exception as e:
+                logger.error("Redis hget prompt 失败: %s", e)
+
+        with self._lock:
+            return self._fallback.get(key, {}).get(template_key)
+
+    def set(self, user_id: str, template_key: str, system_prompt: str) -> None:
+        uid = self._require_user_id(user_id)
+        key = self._key(uid)
+        r = self.client
+        if r:
+            try:
+                r.hset(key, template_key, system_prompt)
+                return
+            except Exception as e:
+                logger.error("Redis hset prompt 失败: %s", e)
+
+        with self._lock:
+            self._fallback.setdefault(key, {})[template_key] = system_prompt
+
+    def delete(self, user_id: str, template_key: str) -> None:
+        uid = self._require_user_id(user_id)
+        key = self._key(uid)
+        r = self.client
+        if r:
+            try:
+                r.hdel(key, template_key)
+                return
+            except Exception as e:
+                logger.error("Redis hdel prompt 失败: %s", e)
+
+        with self._lock:
+            self._fallback.get(key, {}).pop(template_key, None)
+
+
 class PromptService:
-    """提示词工程管理与执行服务"""
+    """提示词工程管理与执行服务（模板默认值全局只读，用户覆盖按 uid 隔离）"""
 
     DEFAULT_TEMPLATES: Dict[str, PromptTemplate] = {
         "mock_interviewer": PromptTemplate(
@@ -138,40 +246,60 @@ class PromptService:
     }
 
     def __init__(self):
-        # 内存中维护当前激活的提示词（支持运行时在线覆盖）
-        self._active_templates: Dict[str, PromptTemplate] = {
-            k: v.copy(deep=True) for k, v in self.DEFAULT_TEMPLATES.items()
-        }
+        # per-user override 存储在 Redis Hash u:{uid}:prompts；本对象不保存跨用户状态。
+        self._store = PromptOverrideStore()
 
-    def get_all_templates(self) -> Dict[str, PromptTemplate]:
-        """获取所有当前激活的提示词模板"""
-        return self._active_templates
+    @staticmethod
+    def _require_user_id(user_id: str) -> str:
+        if not isinstance(user_id, str) or not user_id.strip():
+            raise ValueError("user_id is required and must come from the authenticated token")
+        return user_id.strip()
 
-    def get_template(self, key: str) -> Optional[PromptTemplate]:
-        """获取指定键名的提示词模板"""
-        return self._active_templates.get(key)
-
-    def update_template(self, key: str, system_prompt: str) -> PromptTemplate:
-        """用户自定义更新提示词"""
-        if key not in self._active_templates:
-            raise KeyError(f"未知的提示词模板键名: {key}")
-        tpl = self._active_templates[key]
-        tpl.system_prompt = system_prompt
-        tpl.is_custom = True
-        logger.info(f"✅ [PromptService] 提示词模板已由用户自定义更新: {key}")
+    def _merge_default(self, key: str, override: Optional[str]) -> PromptTemplate:
+        """从代码常量深拷贝一份默认模板，再叠加当前用户自己的覆盖值。"""
+        tpl = self.DEFAULT_TEMPLATES[key].model_copy(deep=True)
+        if override is not None:
+            tpl.system_prompt = override
+            tpl.is_custom = True
         return tpl
 
-    def reset_template(self, key: str) -> PromptTemplate:
-        """恢复指定模板至出厂默认"""
-        if key in self.DEFAULT_TEMPLATES:
-            self._active_templates[key] = self.DEFAULT_TEMPLATES[key].copy(deep=True)
-            logger.info(f"🔄 [PromptService] 提示词模板已恢复默认: {key}")
-            return self._active_templates[key]
-        raise KeyError(f"未知的提示词模板键名: {key}")
+    def get_all_templates(self, user_id: str) -> Dict[str, PromptTemplate]:
+        """获取当前用户看到的全部模板（默认值 + 本人覆盖）。"""
+        uid = self._require_user_id(user_id)
+        overrides = self._store.get_all(uid)
+        return {
+            key: self._merge_default(key, overrides.get(key))
+            for key in self.DEFAULT_TEMPLATES
+        }
 
-    def format_prompt(self, key: str, **kwargs) -> str:
-        """渲染并格式化提示词内容"""
-        tpl = self.get_template(key)
+    def get_template(self, user_id: str, key: str) -> Optional[PromptTemplate]:
+        """获取当前用户指定键名的模板。"""
+        uid = self._require_user_id(user_id)
+        if key not in self.DEFAULT_TEMPLATES:
+            return None
+        return self._merge_default(key, self._store.get(uid, key))
+
+    def update_template(self, user_id: str, key: str, system_prompt: str) -> PromptTemplate:
+        """写入当前用户自己的提示词覆盖，不影响其他用户。"""
+        uid = self._require_user_id(user_id)
+        if key not in self.DEFAULT_TEMPLATES:
+            raise KeyError(f"未知的提示词模板键名: {key}")
+        self._store.set(uid, key, system_prompt)
+        logger.info("✅ [PromptService] 用户自定义提示词已更新: %s", key)
+        return self._merge_default(key, system_prompt)
+
+    def reset_template(self, user_id: str, key: str) -> PromptTemplate:
+        """删除当前用户的覆盖，恢复代码常量默认值。"""
+        uid = self._require_user_id(user_id)
+        if key not in self.DEFAULT_TEMPLATES:
+            raise KeyError(f"未知的提示词模板键名: {key}")
+        self._store.delete(uid, key)
+        logger.info("🔄 [PromptService] 用户提示词已恢复默认: %s", key)
+        return self._merge_default(key, None)
+
+    def format_prompt(self, user_id: str, key: str, **kwargs) -> str:
+        """渲染并格式化当前用户可见的提示词内容。"""
+        tpl = self.get_template(user_id, key)
         if not tpl:
             return ""
         content = tpl.system_prompt
