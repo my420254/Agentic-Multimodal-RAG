@@ -43,6 +43,7 @@ class LLMService:
                 api_key=self.api_key,
                 timeout=120.0,
                 http_client=httpx.AsyncClient(
+                    # NO_PROXY 已在 app.core.config 中清洗，可安全读取环境代理
                     trust_env=True
                 )
             )

@@ -17,6 +17,9 @@ os.environ.setdefault(
     "JWT_SECRET",
     "test-only-jwt-secret-do-not-use-in-production-0123456789",
 )
+# 记忆默认持久化到 agent_db；测试进程关闭，避免污染生产库。
+# 持久化专项测试会显式传入临时 SQLite engine 并 persistence=True。
+os.environ.setdefault("MEMORY_PERSISTENCE", "false")
 
 from app.main import app
 from app.core.database import engine, get_session

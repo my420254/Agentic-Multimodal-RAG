@@ -129,6 +129,7 @@ class RerankService:
             base_url=model.base_url,
             api_key=model.api_key,
             http_client=httpx.Client(
+                # NO_PROXY 已在 app.core.config 中清洗，可安全读取环境代理
                 trust_env=True
             )
         )

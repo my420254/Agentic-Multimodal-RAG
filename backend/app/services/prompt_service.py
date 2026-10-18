@@ -391,10 +391,12 @@ class PromptEngineeringService:
         self,
         rag_context: str = "",
         conversation_summary: str = "",
-        user_query: str = ""
+        user_query: str = "",
+        user_profile: Optional[Dict[str, str]] = None,
+        enable_few_shots: bool = False,
     ) -> str:
-        """构建强隔离的 XML 系统提示词"""
-        shots = self.select_dynamic_few_shots(user_query)
+        """构建强隔离的 XML 系统提示词（支持用户画像与可选 Few-Shot）。"""
+        shots = self.select_dynamic_few_shots(user_query) if enable_few_shots else []
         few_shot_block = ""
         for s in shots:
             few_shot_block += f"""
@@ -404,6 +406,15 @@ class PromptEngineeringService:
   <thought>{s.thought_trace}</thought>
   <answer>{s.final_answer}</answer>
 </exemplar>"""
+
+        profile_block = ""
+        if user_profile:
+            profile_block = "【用户长期偏好与环境】:\n" + "\n".join(
+                f"- {key}: {value}" for key, value in user_profile.items()
+            )
+        memory_context = "\n".join(
+            part for part in (profile_block, conversation_summary) if part
+        )
 
         return f"""<system_role>
 你是由【辽宁大学·辽宁省公共舆情与网络安全信息系统重点实验室】构建的专业 AI 架构师与就业辅导专家。
@@ -422,7 +433,7 @@ class PromptEngineeringService:
 </retrieved_context>
 
 <memory_context>
-{conversation_summary}
+{memory_context}
 </memory_context>
 
 <few_shot_exemplars>

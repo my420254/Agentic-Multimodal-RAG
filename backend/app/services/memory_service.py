@@ -20,11 +20,17 @@ import json
 import logging
 import threading
 import time
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
 import redis
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import Session, delete, func, select
 
 from app.core.config import get_settings
+from app.core.database import engine as default_engine
+from app.models import InterviewMessage, InterviewSession, UserProfile
 from app.services.llm import LLMService
 
 logger = logging.getLogger(__name__)
@@ -37,11 +43,29 @@ SESSION_OWNER_TTL_SECONDS = 86400 * 7
 class MemoryService:
     """分层记忆管理服务（所有方法均要求显式 user_id）"""
 
-    def __init__(self, redis_url: Optional[str] = None):
+    def __init__(
+        self,
+        redis_url: Optional[str] = None,
+        db_engine=None,
+        persistence: Optional[bool] = None,
+    ):
         self.redis_url = redis_url or settings.REDIS_URL
         self._redis_client: Optional[redis.Redis] = None
         self._fallback_memory: Dict[str, Any] = {}  # 内存降级兜底
         self._fallback_lock = threading.RLock()
+        # PostgreSQL 是真源；Redis 只是缓存。测试可传 persistence=False 或独立 SQLite engine。
+        self._db_engine = db_engine or default_engine
+        self.persistence = (
+            settings.MEMORY_PERSISTENCE if persistence is None else persistence
+        )
+
+    @contextmanager
+    def _db_session(self):
+        with Session(self._db_engine) as session:
+            yield session
+
+    def _now(self) -> datetime:
+        return datetime.now(timezone.utc)
 
     @property
     def client(self) -> Optional[redis.Redis]:
@@ -99,17 +123,56 @@ class MemoryService:
 
     # ==================== 会话归属 ====================
 
+    def _claim_session_db(self, uid: str, sid: str) -> Optional[bool]:
+        """PostgreSQL 真源上的会话认领；返回 None 表示 DB 不可用。"""
+        if not self.persistence:
+            return None
+        try:
+            with self._db_session() as db:
+                row = db.get(InterviewSession, sid)
+                if row is not None:
+                    return row.owner_id == uid
+                db.add(
+                    InterviewSession(
+                        id=sid,
+                        owner_id=uid,
+                        created_at=self._now(),
+                        updated_at=self._now(),
+                    )
+                )
+                try:
+                    db.commit()
+                    return True
+                except IntegrityError:
+                    db.rollback()
+                    row = db.get(InterviewSession, sid)
+                    return bool(row and row.owner_id == uid)
+        except Exception as e:
+            logger.error("PG claim_session 失败: %s", e)
+            return None
+
     def claim_session(self, user_id: str, session_id: str, ttl: int = SESSION_OWNER_TTL_SECONDS) -> bool:
         """
-        认领会话归属。
+        认领会话归属（PostgreSQL 为真源，Redis 仅缓存）。
 
-        - 会话不存在：原子创建归属并返回 True（允许新会话）；
+        - 会话不存在：创建归属并返回 True（允许新会话）；
         - 已属于当前用户：返回 True；
         - 已属于其他用户：返回 False（调用方必须返回 404，不能泄露存在性）。
         """
         uid = self._require_user_id(user_id)
         sid = self._require_session_id(session_id)
         owner_key = self._owner_key(sid)
+
+        db_result = self._claim_session_db(uid, sid)
+        if db_result is not None:
+            r = self.client
+            if r:
+                try:
+                    if db_result:
+                        r.set(owner_key, uid, ex=ttl)
+                except Exception as e:
+                    logger.error("Redis 缓存会话归属失败: %s", e)
+            return db_result
 
         r = self.client
         if r:
@@ -128,9 +191,18 @@ class MemoryService:
             return owner == uid
 
     def get_session_owner(self, session_id: str) -> Optional[str]:
-        """读取会话归属；不存在或读失败返回 None。"""
+        """读取会话归属；PostgreSQL 优先，Redis/内存兜底。"""
         sid = self._require_session_id(session_id)
         owner_key = self._owner_key(sid)
+
+        if self.persistence:
+            try:
+                with self._db_session() as db:
+                    row = db.get(InterviewSession, sid)
+                    if row is not None:
+                        return row.owner_id
+            except Exception as e:
+                logger.error("PG get_session_owner 失败: %s", e)
 
         r = self.client
         if r:
@@ -167,6 +239,37 @@ class MemoryService:
         msg_json = json.dumps(msg_obj, ensure_ascii=False)
         key = self._messages_key(uid, sid)
 
+        # PostgreSQL 真源：先落库，再写 Redis 缓存。
+        if self.persistence:
+            try:
+                with self._db_session() as db:
+                    row = db.get(InterviewSession, sid)
+                    if row is None:
+                        row = InterviewSession(
+                            id=sid,
+                            owner_id=uid,
+                            created_at=self._now(),
+                            updated_at=self._now(),
+                        )
+                        db.add(row)
+                    elif row.owner_id != uid:
+                        logger.warning("拒绝向他人会话写入消息: %s", sid)
+                        return
+                    db.add(
+                        InterviewMessage(
+                            session_id=sid,
+                            owner_id=uid,
+                            role=role,
+                            content=content,
+                            created_at=self._now(),
+                        )
+                    )
+                    row.updated_at = self._now()
+                    db.add(row)
+                    db.commit()
+            except Exception as e:
+                logger.error("PG add_message 失败: %s", e)
+
         r = self.client
         if r:
             try:
@@ -180,10 +283,37 @@ class MemoryService:
             self._fallback_memory.setdefault(key, []).append(msg_obj)
 
     def get_recent_messages(self, user_id: str, session_id: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """获取当前用户当前会话最近的 N 条对话记录 (保持时序)。"""
+        """获取当前用户当前会话最近的 N 条对话记录 (保持时序，PG 优先)。"""
         uid = self._require_user_id(user_id)
         sid = self._require_session_id(session_id)
         key = self._messages_key(uid, sid)
+
+        if self.persistence:
+            try:
+                with self._db_session() as db:
+                    rows = db.exec(
+                        select(InterviewMessage)
+                        .where(
+                            InterviewMessage.session_id == sid,
+                            InterviewMessage.owner_id == uid,
+                        )
+                        .order_by(
+                            InterviewMessage.created_at.desc(),
+                            InterviewMessage.id.desc(),
+                        )
+                        .limit(limit)
+                    ).all()
+                    if rows:
+                        return [
+                            {
+                                "role": row.role,
+                                "content": row.content,
+                                "timestamp": row.created_at.timestamp() if row.created_at else 0,
+                            }
+                            for row in reversed(rows)
+                        ]
+            except Exception as e:
+                logger.error("PG get_recent_messages 失败: %s", e)
 
         r = self.client
         if r:
@@ -198,10 +328,26 @@ class MemoryService:
         return items[-limit:]
 
     def get_all_messages_count(self, user_id: str, session_id: str) -> int:
-        """获取当前用户当前会话总消息数。"""
+        """获取当前用户当前会话总消息数（PG 优先）。"""
         uid = self._require_user_id(user_id)
         sid = self._require_session_id(session_id)
         key = self._messages_key(uid, sid)
+
+        if self.persistence:
+            try:
+                with self._db_session() as db:
+                    count = db.exec(
+                        select(func.count())
+                        .select_from(InterviewMessage)
+                        .where(
+                            InterviewMessage.session_id == sid,
+                            InterviewMessage.owner_id == uid,
+                        )
+                    ).one()
+                    if count:
+                        return int(count)
+            except Exception as e:
+                logger.error("PG get_all_messages_count 失败: %s", e)
 
         r = self.client
         if r:
@@ -220,6 +366,22 @@ class MemoryService:
         msg_key = self._messages_key(uid, sid)
         summary_key = self._summary_key(uid, sid)
         owner_key = self._owner_key(sid)
+
+        if self.persistence:
+            try:
+                with self._db_session() as db:
+                    db.exec(
+                        delete(InterviewMessage).where(
+                            InterviewMessage.session_id == sid,
+                            InterviewMessage.owner_id == uid,
+                        )
+                    )
+                    row = db.get(InterviewSession, sid)
+                    if row is not None and row.owner_id == uid:
+                        db.delete(row)
+                    db.commit()
+            except Exception as e:
+                logger.error("PG clear_session 失败: %s", e)
 
         r = self.client
         if r:
@@ -240,10 +402,19 @@ class MemoryService:
     # ==================== L2: 中期滚动会话摘要 ====================
 
     def get_summary(self, user_id: str, session_id: str) -> Optional[str]:
-        """获取当前用户当前会话的背景摘要。"""
+        """获取当前用户当前会话的背景摘要（PG 优先）。"""
         uid = self._require_user_id(user_id)
         sid = self._require_session_id(session_id)
         key = self._summary_key(uid, sid)
+
+        if self.persistence:
+            try:
+                with self._db_session() as db:
+                    row = db.get(InterviewSession, sid)
+                    if row is not None and row.owner_id == uid and row.summary:
+                        return row.summary
+            except Exception as e:
+                logger.error("PG get_summary 失败: %s", e)
 
         r = self.client
         if r:
@@ -256,10 +427,32 @@ class MemoryService:
             return self._fallback_memory.get(key)
 
     def set_summary(self, user_id: str, session_id: str, summary: str, ttl: int = 86400 * 7) -> None:
-        """存储当前用户当前会话更新后的摘要。"""
+        """存储当前用户当前会话更新后的摘要（PG 真源 + Redis 缓存）。"""
         uid = self._require_user_id(user_id)
         sid = self._require_session_id(session_id)
         key = self._summary_key(uid, sid)
+
+        if self.persistence:
+            try:
+                with self._db_session() as db:
+                    row = db.get(InterviewSession, sid)
+                    if row is None:
+                        row = InterviewSession(
+                            id=sid,
+                            owner_id=uid,
+                            created_at=self._now(),
+                            updated_at=self._now(),
+                        )
+                        db.add(row)
+                    elif row.owner_id != uid:
+                        logger.warning("拒绝向他人会话写入摘要: %s", sid)
+                        return
+                    row.summary = summary
+                    row.updated_at = self._now()
+                    db.add(row)
+                    db.commit()
+            except Exception as e:
+                logger.error("PG set_summary 失败: %s", e)
 
         r = self.client
         if r:
@@ -349,9 +542,20 @@ class MemoryService:
     # ==================== L3: 长期用户画像与偏好 ====================
 
     def get_user_profile(self, user_id: str) -> Dict[str, str]:
-        """获取用户的长效画像与偏好配置。"""
+        """获取用户的长效画像与偏好配置（PG 优先）。"""
         uid = self._require_user_id(user_id)
         key = self._profile_key(uid)
+
+        if self.persistence:
+            try:
+                with self._db_session() as db:
+                    rows = db.exec(
+                        select(UserProfile).where(UserProfile.owner_id == uid)
+                    ).all()
+                    if rows:
+                        return {row.field: row.value for row in rows}
+            except Exception as e:
+                logger.error("PG get_user_profile 失败: %s", e)
 
         r = self.client
         if r:
@@ -364,9 +568,42 @@ class MemoryService:
             return dict(self._fallback_memory.get(key, {}))
 
     def set_user_preference(self, user_id: str, field: str, value: str) -> None:
-        """存储用户特定的偏好标签。"""
+        """存储用户特定的偏好标签（PG 真源 + Redis 缓存）。"""
         uid = self._require_user_id(user_id)
         key = self._profile_key(uid)
+
+        if self.persistence:
+            try:
+                with self._db_session() as db:
+                    row = db.exec(
+                        select(UserProfile).where(
+                            UserProfile.owner_id == uid,
+                            UserProfile.field == field,
+                        )
+                    ).first()
+                    if row is None:
+                        db.add(UserProfile(owner_id=uid, field=field, value=value))
+                    else:
+                        row.value = value
+                        row.updated_at = self._now()
+                        db.add(row)
+                    try:
+                        db.commit()
+                    except IntegrityError:
+                        db.rollback()
+                        row = db.exec(
+                            select(UserProfile).where(
+                                UserProfile.owner_id == uid,
+                                UserProfile.field == field,
+                            )
+                        ).first()
+                        if row is not None:
+                            row.value = value
+                            row.updated_at = self._now()
+                            db.add(row)
+                            db.commit()
+            except Exception as e:
+                logger.error("PG set_user_preference 失败: %s", e)
 
         r = self.client
         if r:

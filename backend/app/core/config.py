@@ -9,6 +9,30 @@ from typing import List
 import os
 
 
+def _sanitize_no_proxy() -> None:
+    """
+    清洗 NO_PROXY 中 httpx 无法解析的条目。
+
+    当前环境包含 `<local>` 与 `[::1]`，httpx 在 trust_env=True 时会把它们当作
+    代理 URL 解析，抛出 `Invalid port: ':1]'`，导致 embedding/LLM 全部失败。
+    这里只移除非法项，保留 localhost/127.0.0.1 等有效直连规则；不修改代理地址。
+    """
+    invalid = {"<local>", "[::1]", "::1"}
+    for key in ("NO_PROXY", "no_proxy"):
+        raw = os.environ.get(key)
+        if not raw:
+            continue
+        parts = []
+        for item in raw.split(","):
+            item = item.strip()
+            if item and item.lower() not in invalid:
+                parts.append(item)
+        os.environ[key] = ",".join(parts)
+
+
+_sanitize_no_proxy()
+
+
 class Settings(BaseSettings):
     """应用配置"""
 
@@ -93,6 +117,11 @@ class Settings(BaseSettings):
     JWT_ALG: str = "HS256"
     ACCESS_TTL_MIN: int = 15
     REFRESH_TTL_DAYS: int = 7
+
+    # ==================== 记忆持久化 ====================
+    # true：会话/消息/画像以 PostgreSQL 为真源，Redis 仅作缓存（重启/过期不丢）；
+    # false：兼容旧行为，仅 Redis/内存（测试可关闭，避免污染 agent_db）。
+    MEMORY_PERSISTENCE: bool = True
 
     @field_validator("JWT_SECRET")
     @classmethod

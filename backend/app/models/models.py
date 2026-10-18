@@ -3,6 +3,7 @@
 """
 
 from sqlmodel import SQLModel, Field, Relationship
+from sqlalchemy import UniqueConstraint
 from typing import Optional, List
 from datetime import datetime, timezone
 from enum import Enum
@@ -216,3 +217,44 @@ class User(SQLModel, table=True):
     status: str = Field(default="active", max_length=32)
     created_at: datetime = Field(default_factory=utc_now)
     deleted_at: Optional[datetime] = Field(default=None, index=True)
+
+
+class InterviewSession(SQLModel, table=True):
+    """面试/对话会话（PostgreSQL 持久化，Redis 仅作缓存）"""
+
+    __tablename__ = "interview_sessions"
+
+    id: str = Field(primary_key=True, max_length=128)
+    owner_id: str = Field(index=True, max_length=64)
+    title: Optional[str] = Field(default=None, max_length=255)
+    summary: Optional[str] = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class InterviewMessage(SQLModel, table=True):
+    """会话消息（PostgreSQL 持久化，不再依赖 Redis 7 天 TTL）"""
+
+    __tablename__ = "interview_messages"
+
+    id: str = Field(default_factory=generate_uuid, primary_key=True)
+    session_id: str = Field(foreign_key="interview_sessions.id", index=True, max_length=128)
+    owner_id: str = Field(index=True, max_length=64)
+    role: str = Field(max_length=32)
+    content: str
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class UserProfile(SQLModel, table=True):
+    """用户长期画像（PostgreSQL 持久化）"""
+
+    __tablename__ = "user_profiles"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "field", name="uq_user_profiles_owner_field"),
+    )
+
+    id: str = Field(default_factory=generate_uuid, primary_key=True)
+    owner_id: str = Field(index=True, max_length=64)
+    field: str = Field(max_length=100)
+    value: str
+    updated_at: datetime = Field(default_factory=utc_now)

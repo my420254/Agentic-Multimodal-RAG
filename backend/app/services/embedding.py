@@ -70,6 +70,7 @@ class EmbeddingService:
                 for i, text in enumerate(texts):
                     # 复用单个处理逻辑 (递归调用自己，但 ensure list)
                     # 注意：为了避免无限递归，这里我们直接构造单次请求
+                    # NO_PROXY 已在 app.core.config 中清洗；这里使用标准环境代理
                     async with httpx.AsyncClient(timeout=60.0, verify=False, trust_env=True) as client:
                         response = await client.post(
                             url,
@@ -93,7 +94,7 @@ class EmbeddingService:
                             raise Exception(f"Legacy Ollama response missing embedding: {result.keys()}")
                 return embeddings
 
-            # 增加超时时间，并关闭 verify，禁用环境变量（代理）
+            # 增加超时时间，并关闭 verify；环境代理可用（NO_PROXY 已清洗）
             async with httpx.AsyncClient(timeout=60.0, verify=False, trust_env=True) as client:
                 # 构造请求体
                 req_json = {

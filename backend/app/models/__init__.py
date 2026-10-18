@@ -15,6 +15,9 @@ from app.models.models import (
     IndexStats,
     RetrievalLog,
     User,
+    InterviewSession,
+    InterviewMessage,
+    UserProfile,
 )
 
 __all__ = [
@@ -30,4 +33,7 @@ __all__ = [
     "IndexStats",
     "RetrievalLog",
     "User",
+    "InterviewSession",
+    "InterviewMessage",
+    "UserProfile",
 ]
