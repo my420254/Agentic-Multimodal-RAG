@@ -73,6 +73,8 @@ async def chat_completions(
                 bm25_weight=data.bm25_weight,
                 rerank_top_k=data.rerank_top_k,
                 context_window=data.context_window,
+                session_id=data.session_id,
+                user_id=data.user_id,
             ):
                 # 格式化 SSE 事件
                 yield f"event: {event_type}\n"

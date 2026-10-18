@@ -10,12 +10,13 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 import logging
 
 from app.core.config import get_settings
+from app.core.circuit_breaker import llm_circuit_breaker
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
 class LLMService:
-    """LLM 服务"""
+    """LLM 服务 (集成重试 + 三态熔断保护)"""
 
     def __init__(self, base_url: str = None, api_key: str = None, model: str = None):
         self.base_url = base_url or settings.LLM_BASE_URL
@@ -28,8 +29,12 @@ class LLMService:
             self.base_url = self.base_url.rstrip("/")
 
         self.api_key = api_key or settings.LLM_API_KEY
-        self.model = model or settings.LLM_MODEL
+        if model in [None, "", "sys_llm", "default", "system"]:
+            self.model = settings.LLM_MODEL
+        else:
+            self.model = model
         self._client = None
+        self.circuit_breaker = llm_circuit_breaker
 
     def _get_client(self):
         if not self._client:
@@ -38,7 +43,7 @@ class LLMService:
                 api_key=self.api_key,
                 timeout=120.0,
                 http_client=httpx.AsyncClient(
-                    trust_env=False
+                    trust_env=True
                 )
             )
         return self._client
@@ -50,7 +55,7 @@ class LLMService:
         before_sleep=before_sleep_log(logger, logging.WARNING)
     )
     async def rewrite_query(self, query: str) -> str:
-        """问题改写"""
+        """问题改写 (受熔断器保护)"""
         system_prompt = """你是一个问题优化助手。请将用户输入的口语化问题改写为更清晰、更完整的查询语句。
 要求：
 1. 保持原意不变
@@ -60,7 +65,7 @@ class LLMService:
 
         client = self._get_client()
         
-        try:
+        async def _do_call():
             response = await client.chat.completions.create(
                 model=self.model,
                 messages=[
@@ -71,8 +76,11 @@ class LLMService:
                 temperature=0.3,
             )
             return response.choices[0].message.content.strip()
+
+        try:
+            return await self.circuit_breaker.call(_do_call)
         except Exception as e:
-            print(f"Rewrite Query Error: {e}")
+            logger.error("Rewrite Query Error: %s", e)
             raise e
 
     @retry(
@@ -89,10 +97,18 @@ class LLMService:
         temperature: float = 0.7,
     ) -> AsyncGenerator[str, None]:
         """
-        流式生成回答
+        流式生成回答 (带熔断检测与优雅降级)
         """
+        # 预先检查熔断器状态，若已处于 OPEN 状态则直接快速失败，避免长时间悬挂
+        if self.circuit_breaker.state.value == "open":
+            if not self.circuit_breaker._should_attempt_reset():
+                raise RuntimeError(f"下游大模型服务熔断保护中 [{self.circuit_breaker.name}]，请稍后重试。")
+
         client = self._get_client()
-        target_model = model_id or self.model
+        if model_id in [None, "", "sys_llm", "default", "system"]:
+            target_model = self.model
+        else:
+            target_model = model_id
 
         # 构造消息列表
         request_messages = []
@@ -102,9 +118,7 @@ class LLMService:
         request_messages.extend(messages)
 
         try:
-            print(f"DEBUG_LLM: Sending request to {target_model}")
-            # print(f"DEBUG_LLM: Messages structure: {request_messages}") # 调试用，注意日志脱敏
-
+            logger.debug("Sending streaming request to %s", target_model)
             response = await client.chat.completions.create(
                 model=target_model,
                 messages=request_messages,
@@ -115,9 +129,13 @@ class LLMService:
             async for chunk in response:
                 if chunk.choices and chunk.choices[0].delta.content:
                     yield chunk.choices[0].delta.content
+            
+            # 流式成功结束后通知熔断器记录成功
+            self.circuit_breaker._record_success()
 
         except Exception as e:
-            print(f"LLM Generate Error: {e}")
+            self.circuit_breaker._record_failure(e)
+            logger.error("LLM Stream Generate Error: %s", e)
             raise e
 
     @retry(
@@ -132,7 +150,7 @@ class LLMService:
         system_prompt: str = None,
         model_id: str = None,
     ) -> str:
-        """非流式生成回答"""
+        """非流式生成回答 (受熔断器保护)"""
         client = self._get_client()
         target_model = model_id or self.model
         request_messages = []
@@ -142,7 +160,7 @@ class LLMService:
 
         request_messages.extend(messages)
 
-        try:
+        async def _do_call():
             response = await client.chat.completions.create(
                 model=target_model,
                 messages=request_messages,
@@ -150,9 +168,12 @@ class LLMService:
                 temperature=0.7,
             )
             return response.choices[0].message.content
+
+        try:
+            return await self.circuit_breaker.call(_do_call)
         except Exception as e:
-             print(f"LLM Generate Error: {e}")
-             raise e
+            logger.error("LLM Generate Error: %s", e)
+            raise e
 
     def get_chat_model(self, temperature: float = 0.5, streaming: bool = True, max_tokens: int = None) -> ChatOpenAI:
         """获取 LangChain ChatOpenAI 实例"""

@@ -5,7 +5,7 @@ Chunk 管理 API 路由
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 from typing import List
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.core.database import get_session
 from app.models import FileDocument, DocumentChunk, FileStatus
@@ -122,7 +122,7 @@ async def vectorize_file(
     # 更新状态为向量化中
     file_doc.status = FileStatus.EMBEDDING
     file_doc.progress = 0
-    file_doc.updated_at = datetime.utcnow()
+    file_doc.updated_at = datetime.now(timezone.utc)
     session.add(file_doc)
     session.commit()
 

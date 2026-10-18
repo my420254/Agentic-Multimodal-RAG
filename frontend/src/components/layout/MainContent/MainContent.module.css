@@ -7,4 +7,9 @@
   min-height: 100vh;
   padding: 24px;
   background-color: var(--bg-secondary);
+  flex: 1;
+  min-width: 0;
+  width: calc(100% - var(--sidebar-width));
+  max-width: calc(100% - var(--sidebar-width));
+  box-sizing: border-box;
 }

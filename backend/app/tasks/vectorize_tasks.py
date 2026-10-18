@@ -3,7 +3,7 @@
 """
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlmodel import Session, select
 
 from app.tasks.celery_app import celery_app
@@ -74,8 +74,13 @@ def vectorize_file_task(self, file_id: str):
                 # 使用实际的模型名称而不是 ID
                 target_model_id = custom_model.model_name
             else:
-                embedding_service = EmbeddingService()
-                target_model_id = embedding_model_id
+                real_model = settings.EMBEDDING_MODEL
+                embedding_service = EmbeddingService(
+                    base_url=settings.EMBEDDING_BASE_URL,
+                    api_key=settings.EMBEDDING_API_KEY,
+                    model=real_model
+                )
+                target_model_id = real_model
 
             vector_service = VectorStoreService()
 
@@ -123,7 +128,7 @@ def vectorize_file_task(self, file_id: str):
             # 更新文件状态
             file_doc.status = FileStatus.READY
             file_doc.progress = 100
-            file_doc.updated_at = datetime.utcnow()
+            file_doc.updated_at = datetime.now(timezone.utc)
             session.add(file_doc)
 
             # 更新知识库统计
@@ -131,7 +136,7 @@ def vectorize_file_task(self, file_id: str):
             if kb:
                 # 重新计算总 chunk 数
                 kb.chunk_count = vector_service.get_count(kb.id)
-                kb.updated_at = datetime.utcnow()
+                kb.updated_at = datetime.now(timezone.utc)
                 session.add(kb)
 
             session.commit()
@@ -146,7 +151,7 @@ def vectorize_file_task(self, file_id: str):
             # 更新状态为失败
             file_doc.status = FileStatus.FAILED
             file_doc.error_message = str(e)
-            file_doc.updated_at = datetime.utcnow()
+            file_doc.updated_at = datetime.now(timezone.utc)
             session.add(file_doc)
             session.commit()
 

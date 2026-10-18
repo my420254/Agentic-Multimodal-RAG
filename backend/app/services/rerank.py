@@ -91,11 +91,45 @@ class RerankService:
 
     def _rerank_via_api(self, query: str, candidates: List[str], model: CustomModel) -> List[Dict[str, Any]]:
         """通过 API 调用 Rerank"""
+        # 1. 优先尝试标准 Rerank API (如 SiliconFlow / Cohere / Jina / BGE 等)
+        try:
+            base = model.base_url.rstrip("/")
+            rerank_url = base if base.endswith("/rerank") else f"{base}/rerank"
+            headers = {
+                "Authorization": f"Bearer {model.api_key}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": model.model_name,
+                "query": query,
+                "documents": [c[:2000] for c in candidates],
+                "top_n": len(candidates)
+            }
+            import requests
+            resp = requests.post(rerank_url, headers=headers, json=payload, timeout=15)
+            if resp.status_code == 200:
+                data = resp.json()
+                results = data.get("results", [])
+                final_results = []
+                for item in results:
+                    idx = item.get("index")
+                    score = item.get("relevance_score", item.get("score", 0.0))
+                    if idx is not None and 0 <= idx < len(candidates):
+                        final_results.append({
+                            "index": idx,
+                            "score": float(score),
+                            "text": candidates[idx]
+                        })
+                final_results.sort(key=lambda x: x["score"], reverse=True)
+                return final_results
+        except Exception as e:
+            print(f"Standard Rerank API endpoint failed, falling back to chat completions: {e}")
+
         client = OpenAI(
             base_url=model.base_url,
             api_key=model.api_key,
             http_client=httpx.Client(
-                trust_env=False
+                trust_env=True
             )
         )
 
@@ -188,24 +222,37 @@ def test_rerank_connection(model_in: Any) -> Dict[str, Any]:
             except Exception as e:
                 return {"success": False, "message": f"本地模型加载失败: {str(e)}", "error": str(e)}
         else:
-            # 测试远程 API (保持原有逻辑)
-            # ... (原有 API 测试逻辑，略简化或复用)
-            # 为保持简洁，这里只保留基本的 API 测试
             api_key = getattr(model_in, "api_key", "")
             if isinstance(model_in, dict):
                 api_key = model_in.get("api_key", "")
-                
-            client = OpenAI(base_url=base_url, api_key=api_key)
-            # ... 发送简单请求 ...
-            # 鉴于用户主要关注本地，这里简单做个连通性检查即可，或者复用上面的 prompt
-            # 为了完整性，还是写全一点
+
+            # 1. 优先尝试标准 Rerank API (如 SiliconFlow / Cohere / Jina / BGE 等)
             try:
-                 response = client.chat.completions.create(
+                import requests
+                base = base_url.rstrip("/")
+                rerank_url = base if base.endswith("/rerank") else f"{base}/rerank"
+                headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                payload = {
+                    "model": model_name,
+                    "query": "测试",
+                    "documents": ["测试文档1", "测试文档2"],
+                    "top_n": 2
+                }
+                resp = requests.post(rerank_url, headers=headers, json=payload, timeout=15)
+                if resp.status_code == 200:
+                    return {"success": True, "message": "Rerank API 连接测试成功"}
+            except Exception as e:
+                pass
+
+            # 2. 备选尝试 Chat Completions API
+            try:
+                client = OpenAI(base_url=base_url, api_key=api_key)
+                response = client.chat.completions.create(
                     model=model_name,
                     messages=[{"role": "user", "content": "test"}],
                     max_tokens=10
                 )
-                 return {"success": True, "message": "API 连接成功"}
+                return {"success": True, "message": "API 连接成功"}
             except Exception as e:
                 return {"success": False, "message": f"API 连接失败: {str(e)}"}
 

@@ -124,6 +124,20 @@ class TextSplitter:
             except Exception as e:
                 print(f"⚠️ [TextSplitter] 初始化 LangChain Splitter 失败: {e}，回退到基于字符的切分", flush=True)
 
+    def count_tokens(self, text: str) -> int:
+        """计算文本 Token 数"""
+        if not text:
+            return 0
+        if self.langchain_splitter:
+            try:
+                if hasattr(self.langchain_splitter, '_length_function'):
+                    return self.langchain_splitter._length_function(text)
+                elif hasattr(self.langchain_splitter, '_tokenizer'):
+                    return len(self.langchain_splitter._tokenizer.encode(text))
+            except Exception:
+                pass
+        return len(text)
+
     def _find_sentence_boundary(self, text: str, start: int, end: int, forward: bool = True) -> int:
 
         """

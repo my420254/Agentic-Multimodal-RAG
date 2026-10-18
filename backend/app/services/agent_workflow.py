@@ -324,19 +324,45 @@ Output ONLY one word: "chat" or "qa".
                     )
                 )
         
-        return {"messages": tool_outputs}
+        # 记录执行历史签名以防死循环
+        current_sig = ""
+        try:
+            current_sig = json.dumps([{"name": tc.get("name"), "args": tc.get("args")} for tc in last_message.tool_calls], sort_keys=True)
+        except Exception:
+            pass
+        new_history = list(state.get("execution_history", []))
+        if current_sig:
+            new_history.append(current_sig)
+
+        return {"messages": tool_outputs, "execution_history": new_history}
 
     def should_continue(self, state: AgentState):
-        """决定是继续调用工具还是结束"""
+        """决定是继续调用工具还是结束 (带死循环检测与步数熔断)"""
         messages = state["messages"]
         last_message = messages[-1]
+        retry_count = state.get("retry_count", 0)
         
-        # 如果有 tool_calls，则继续
-        if last_message.tool_calls:
-            return "continue"
+        # 1. 达到最大重试或步数上限 (熔断保护)
+        if retry_count >= 3:
+            return "end"
         
-        # 否则结束
-        return "end"
+        # 2. 如果没有 tool_calls，结束
+        if not hasattr(last_message, "tool_calls") or not last_message.tool_calls:
+            return "end"
+        
+        # 3. 死循环检测 (Loop Detection)
+        # 检测是否连续调用完全相同的参数
+        tool_calls = last_message.tool_calls
+        exec_history = state.get("execution_history", [])
+        try:
+            current_signature = json.dumps([{"name": tc.get("name"), "args": tc.get("args")} for tc in tool_calls], sort_keys=True)
+            if exec_history and exec_history[-1] == current_signature:
+                # 连续两次完全相同参数，判定陷入局部最优/死循环，直接跳出熔断
+                return "end"
+        except Exception:
+            pass
+
+        return "continue"
 
     async def process_tool_output(self, state: AgentState):
         """处理工具输出，解析 JSON，记录 Observation"""
@@ -377,81 +403,110 @@ Output ONLY one word: "chat" or "qa".
         }
 
     async def grade_documents(self, state: AgentState, config: RunnableConfig):
-        """文档评分节点，处理重试逻辑"""
+        """文档反思评估节点 (借鉴 agent-interview-hub 结构化审查模式)，处理重试与死循环保护"""
         citations = state.get("citations", [])
         
         # 0. 如果无结果
         if not citations:
-             score = 0.0
+            score = 0.0
+            is_sufficient = False
+            missing_info = "知识库未召回任何相关切片"
+            suggested_query = state.get("original_query", "")
         else:
-            # 1. 评分
+            # 1. 结构化反思审查
             query = state.get("original_query", "")
             context = state.get("rag_context", "")
             
-            prompt = f"""你是一个文档相关性评分员。
-用户问题: {query}
-检索到的文档片段:
-{context[:2000]}... (截断)
+            prompt = f"""你是一个严格的文档质量与反思审查员。请对检索片段是否能有效解答用户问题进行评估。
 
-请对文档与问题的相关性进行评分 (0.0 到 1.0)。
-- 1.0: 完美匹配，包含直接答案。
-- 0.8: 高度相关，包含大部分信息。
-- 0.5: 部分相关，可能需要推断。
-- 0.0: 完全不相关。
+## 用户问题:
+{query}
 
-只输出一个数字，例如: 0.85
+## 检索到的文档片段:
+{context[:2000]}... (已截断)
+
+## 你必须只输出一个 JSON 对象，格式如下：
+{{
+  "relevance_score": 0.0到1.0的浮点数,
+  "is_sufficient": true/false,
+  "missing_info": "如果不足，简要说明遗漏的要点；否则填空字符串",
+  "suggested_query": "如果不足，给出可尝试重新检索的更精准关键词；否则填空字符串"
+}}
 """
             try:
                 llm = self._get_llm_service(state)
                 response = await llm.get_chat_model(temperature=0.1).ainvoke([HumanMessage(content=prompt)], config=config)
-                score_str = response.content.strip()
+                raw_text = response.content.strip()
+                import json
                 import re
-                match = re.search(r"0\.\d+|1\.0|0|1", score_str)
-                score = float(match.group()) if match else 0.5
+                
+                # 提取 JSON
+                json_match = re.search(r"\{[\s\S]*\}", raw_text)
+                if json_match:
+                    ref_data = json.loads(json_match.group(0))
+                else:
+                    ref_data = json.loads(raw_text)
+                
+                score = float(ref_data.get("relevance_score", 0.7))
+                is_sufficient = bool(ref_data.get("is_sufficient", score >= 0.75))
+                missing_info = str(ref_data.get("missing_info", ""))
+                suggested_query = str(ref_data.get("suggested_query", ""))
             except Exception as e:
-                print(f"Grading failed: {e}")
-                score = 0.5 # Fallback
+                # 容错降级
+                score = 0.65
+                is_sufficient = True
+                missing_info = f"反思解析异常: {e}"
+                suggested_query = ""
             
+        reflection_summary = f"评分: {score:.2f} | 充分度: {'充足' if is_sufficient else '不足'}"
+        if missing_info:
+            reflection_summary += f" | 缺失: {missing_info}"
+        if suggested_query:
+            reflection_summary += f" | 建议改写: {suggested_query}"
+
         steps = [{
             "step": "reflection",
-            "content": f"Score: {score} (相关性评分)"
+            "content": reflection_summary
         }]
         
         # 2. 检查重试逻辑
         messages = []
         retry_count = state.get("retry_count", 0)
         
-        if score < 0.8: # 阈值 0.8
-            if retry_count < 3:
-                new_retry_count = retry_count + 1
-                hint = f"Observation: 检索结果相关性评分较低 ({score})。请尝试改写查询或拆分问题进行重试。这是第 {new_retry_count}/3 次重试。"
-                messages.append(HumanMessage(content=hint)) # 注入 HumanMessage 作为提示
-                
-                steps.append({
-                    "step": "reflection",
-                    "content": f"评分过低 ({score} < 0.8)，准备第 {new_retry_count} 次重试..."
-                })
-                
-                return {
-                    "last_score": score,
-                    "retry_count": new_retry_count,
-                    "messages": messages,
-                    "agent_steps": steps
-                }
-            else:
-                hint = f"Observation: 检索结果相关性评分较低 ({score})，且已达到最大重试次数。请基于现有信息尽力回答，并在回答中说明信息可能不完整。"
-                messages.append(HumanMessage(content=hint))
-                
-                steps.append({
-                    "step": "reflection",
-                    "content": "已达到最大重试次数，将基于现有信息回答。"
-                })
-                
-                return {
-                    "last_score": score,
-                    "messages": messages,
-                    "agent_steps": steps
-                }
+        if (score < 0.75 or not is_sufficient) and retry_count < 3:
+            new_retry_count = retry_count + 1
+            hint = f"Observation: 检索结果评估质量较低 (Score: {score:.2f}, 缺失: {missing_info})。"
+            if suggested_query:
+                hint += f" 建议尝试检索关键词: '{suggested_query}'。"
+            hint += f" 这是第 {new_retry_count}/3 次重试。"
+
+            messages.append(HumanMessage(content=hint))
+            
+            steps.append({
+                "step": "reflection",
+                "content": f"质量未达标 ({score:.2f} < 0.75)，触发第 {new_retry_count} 次自适应检索重试..."
+            })
+            
+            return {
+                "last_score": score,
+                "retry_count": new_retry_count,
+                "messages": messages,
+                "agent_steps": steps
+            }
+        elif score < 0.75 and retry_count >= 3:
+            hint = f"Observation: 检索结果相关性评分依然偏低 ({score:.2f})，但已达最大重试上限 (3次)。请基于现有上下文作答，明确说明知识库信息可能不完整或缺失相关记录，坚决防止幻觉。"
+            messages.append(HumanMessage(content=hint))
+            
+            steps.append({
+                "step": "reflection",
+                "content": "已达到最大重试次数，将基于现有信息回答。"
+            })
+            
+            return {
+                "last_score": score,
+                "messages": messages,
+                "agent_steps": steps
+            }
         
         return {"last_score": score, "agent_steps": steps}
 

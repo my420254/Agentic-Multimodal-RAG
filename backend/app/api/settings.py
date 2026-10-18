@@ -102,7 +102,7 @@ async def get_custom_models(session: Session = Depends(get_session)):
     return ApiResponse(data=response_list)
 
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 @router.post("/models", response_model=ApiResponse[CustomModelResponse])
 async def create_custom_model(
@@ -127,7 +127,7 @@ async def create_custom_model(
         base_url=model_in.base_url,
         api_key=model_in.api_key,
         model_name=model_in.model_name,
-        updated_at=datetime.utcnow(), # Fix: set updated_at
+        updated_at=datetime.now(timezone.utc), # Fix: set updated_at
     )
     session.add(db_model)
     session.commit()
@@ -169,7 +169,7 @@ async def update_custom_model(
         except ValueError:
              raise HTTPException(status_code=400, detail="无效的模型类型")
 
-    db_model.updated_at = datetime.utcnow()
+    db_model.updated_at = datetime.now(timezone.utc)
     session.add(db_model)
     session.commit()
     session.refresh(db_model)
@@ -206,47 +206,26 @@ async def test_custom_model_connection(
         raise HTTPException(status_code=404, detail="模型不存在")
 
     try:
-        # 根据模型类型进行简单测试
+        import requests
+        # 根据模型类型进行轻量高效的连接测试
         if db_model.model_type == ModelType.EMBEDDING:
-            from app.services.embedding import EmbeddingService
-            service = EmbeddingService(
-                base_url=db_model.base_url,
-                api_key=db_model.api_key,
-                model=db_model.model_name
-            )
-            # 尝试 embed 一个简单字符串
-            await service.embed_query("test connection")
-            
-        elif db_model.model_type == ModelType.LLM:
-            from app.services.llm import LLMService
-            service = LLMService(
-                base_url=db_model.base_url,
-                api_key=db_model.api_key,
-                model=db_model.model_name
-            )
-            # 尝试简单对话，只生成 1 token 验证连接
-            # 注意：generate_stream 是个 async generator
-            async for _ in service.generate_stream(
-                messages=[{"role": "user", "content": "hi"}], 
-                model_id=db_model.model_name
-            ):
-                break # 只要能收到第一个 chunk 就说明连接成功
-                
-        elif db_model.model_type == ModelType.VLM:
-             # VLM 暂时没有独立的 Service 类封装，或者复用 LLMService
-             # 假设 VLM 也可以用 LLMService 测试文本对话能力 (大部分 VLM 都兼容 LLM 接口)
-            from app.services.llm import LLMService
-            service = LLMService(
-                base_url=db_model.base_url,
-                api_key=db_model.api_key,
-                model=db_model.model_name
-            )
-            async for _ in service.generate_stream(
-                messages=[{"role": "user", "content": "hi"}], 
-                model_id=db_model.model_name
-            ):
-                break
-        
+            headers = {"Authorization": f"Bearer {db_model.api_key}", "Content-Type": "application/json"}
+            url = f"{db_model.base_url.rstrip('/')}/embeddings"
+            resp = requests.post(url, headers=headers, json={"model": db_model.model_name, "input": ["test"]}, timeout=15)
+            if resp.status_code >= 400:
+                raise Exception(f"HTTP {resp.status_code}: {resp.text}")
+
+        elif db_model.model_type in (ModelType.LLM, ModelType.VLM):
+            headers = {"Authorization": f"Bearer {db_model.api_key}", "Content-Type": "application/json"}
+            url = f"{db_model.base_url.rstrip('/')}/chat/completions"
+            resp = requests.post(url, headers=headers, json={
+                "model": db_model.model_name,
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 5
+            }, timeout=30)
+            if resp.status_code >= 400:
+                raise Exception(f"HTTP {resp.status_code}: {resp.text}")
+
         elif db_model.model_type == ModelType.RERANK:
             from app.services.rerank import test_rerank_connection
             result = test_rerank_connection(db_model)
@@ -273,15 +252,28 @@ async def get_model_list(session: Session = Depends(get_session)):
     print("🔍 [GetModelList] 开始获取模型列表...")
 
     # 1. 系统预设模型 (从 .env 读取)
+    if settings.LLM_MODEL:
+        models.append(ModelInfo(
+            id="sys_llm",
+            name=f"DeepSeek ({settings.LLM_MODEL})",
+            type="llm",
+            provider="System"
+        ))
     if settings.EMBEDDING_MODEL:
         sys_model = ModelInfo(
             id="sys_embedding",
-            name=f"System Embedding ({settings.EMBEDDING_MODEL})",
+            name=f"SiliconFlow ({settings.EMBEDDING_MODEL})",
             type="embedding",
             provider="System"
         )
         models.append(sys_model)
-        print(f"✅ [GetModelList] 添加系统模型: {sys_model.name}")
+    if settings.VLM_MODEL:
+        models.append(ModelInfo(
+            id="sys_vlm",
+            name=f"SiliconFlow VLM ({settings.VLM_MODEL})",
+            type="vlm",
+            provider="System"
+        ))
 
     # 2. 自定义模型 (从数据库读取)
     try:

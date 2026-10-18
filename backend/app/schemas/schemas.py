@@ -216,6 +216,9 @@ class ChatRequest(BaseModel):
     bm25_weight: float = 0.3
     rerank_top_k: int = 20
     context_window: int = 1  # 上下文窗口大小
+    # 记忆与会话上下文
+    session_id: Optional[str] = None
+    user_id: Optional[str] = "default_user"
 
 
 # ==================== SSE 事件 ====================

@@ -4,7 +4,7 @@
 
 from sqlmodel import SQLModel, Field, Relationship
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 import uuid
 
@@ -12,6 +12,11 @@ import uuid
 def generate_uuid() -> str:
     """生成 UUID 字符串"""
     return str(uuid.uuid4())
+
+
+def utc_now() -> datetime:
+    """生成具备时区信息的 UTC datetime"""
+    return datetime.now(timezone.utc)
 
 
 class FileStatus(str, Enum):
@@ -44,8 +49,8 @@ class KnowledgeBase(SQLModel, table=True):
     vlm_model: str
     chunk_count: int = Field(default=0)
     is_deleted: bool = Field(default=False, index=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
 
     # 关系
     files: List["FileDocument"] = Relationship(back_populates="knowledge_base")
@@ -63,8 +68,8 @@ class FileDocument(SQLModel, table=True):
     status: FileStatus = Field(default=FileStatus.PENDING)
     progress: int = Field(default=0)
     error_message: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
 
     # 关系
     knowledge_base: Optional[KnowledgeBase] = Relationship(back_populates="files")
@@ -82,7 +87,7 @@ class DocumentChunk(SQLModel, table=True):
     content_type: ContentType = Field(default=ContentType.TEXT)
     image_path: Optional[str] = None
     original_index: int = Field(default=0)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
 
     # 新增字段：父子关系和层级信息
     parent_id: Optional[str] = Field(default=None, index=True)  # 父 chunk ID
@@ -115,8 +120,8 @@ class CustomModel(SQLModel, table=True):
     model_name: str = Field(description="实际调用的模型名称")
     context_length: int = Field(default=4096, description="上下文长度")
     is_active: bool = Field(default=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
 
 
 class ChunkIndex(SQLModel, table=True):
@@ -131,7 +136,7 @@ class ChunkIndex(SQLModel, table=True):
     terms: str = Field(default="{}")  # JSON: {"term1": tf1, "term2": tf2, ...} 词频
     doc_length: int = Field(default=0)  # 文档长度（词数）
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 class IndexStats(SQLModel, table=True):
@@ -142,7 +147,7 @@ class IndexStats(SQLModel, table=True):
     total_docs: int = Field(default=0)  # 总文档数
     avg_doc_length: float = Field(default=0.0)  # 平均文档长度
     term_doc_freq: str = Field(default="{}")  # JSON: {"term1": df1, "term2": df2, ...} 文档频率
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=utc_now)
 
 
 class RetrievalLog(SQLModel, table=True):
@@ -177,4 +182,22 @@ class RetrievalLog(SQLModel, table=True):
     # 结果摘要（用于前端展示）
     results_summary: str = Field(default="[]")  # JSON: 前几条结果的摘要
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class BenchmarkRecord(SQLModel, table=True):
+    """自动化评测基准记录表"""
+    __tablename__ = "benchmark_records"
+
+    id: str = Field(default_factory=generate_uuid, primary_key=True)
+    plan_name: str = Field(index=True)
+    dataset_name: str = Field(default="SRE Golden Benchmark 50")
+    total_cases: int = Field(default=0)
+    success_rate: float = Field(default=0.0)
+    hit_rate: float = Field(default=0.0)
+    hallucination_count: int = Field(default=0)
+    avg_latency: float = Field(default=0.0)
+    avg_tokens: int = Field(default=0)
+    llm_judge_score: float = Field(default=4.5)
+    details_json: str = Field(default="[]")
+    created_at: datetime = Field(default_factory=utc_now)

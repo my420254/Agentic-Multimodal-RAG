@@ -16,8 +16,8 @@ class Settings(BaseSettings):
     PORT: int = 8000
     ENV: str = "dev"
 
-    # 数据库与存储。运行时数据默认保存在当前部署目录，不进入 Git。
-    DATABASE_URL: str = "sqlite:///./local.db"
+    # 数据库与存储 (生产级 PostgreSQL + Redis)
+    DATABASE_URL: str = "postgresql+psycopg2://postgres:postgres@localhost:5432/agent_db"
     REDIS_URL: str = "redis://localhost:6379/0"
     CHROMA_DB_DIR: str = "./storage/chroma_db"
     UPLOAD_DIR: str = "./storage/uploads"
@@ -82,7 +82,7 @@ class Settings(BaseSettings):
     MAX_CHAT_HISTORY_ROUNDS: int = 20       # 最大保留历史对话轮数
 
     class Config:
-        env_file = ".env"
+        env_file = (".env", "backend/.env")
         env_file_encoding = "utf-8"
         extra = "ignore"
 

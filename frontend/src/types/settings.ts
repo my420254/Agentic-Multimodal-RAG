@@ -7,6 +7,7 @@ export interface ModelInfo {
   id: string;
   name: string;
   type: 'embedding' | 'vlm' | 'llm' | 'rerank';
+  model_type?: 'embedding' | 'vlm' | 'llm' | 'rerank';
   provider: string;
   description?: string;
 }

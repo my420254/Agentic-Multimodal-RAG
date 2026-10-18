@@ -9,22 +9,25 @@ from app.core.config import get_settings
 settings = get_settings()
 
 # 创建数据库引擎
-# 增加 timeout 防止 database is locked
-connect_args = {"check_same_thread": False, "timeout": 30} if "sqlite" in settings.DATABASE_URL else {}
+if "postgresql" in settings.DATABASE_URL or "postgres" in settings.DATABASE_URL:
+    engine = create_engine(
+        settings.DATABASE_URL,
+        echo=settings.ENV == "dev",
+        pool_size=10,
+        max_overflow=20,
+        pool_pre_ping=True,
+    )
+else:
+    # 兼容 SQLite
+    connect_args = {"check_same_thread": False, "timeout": 30} if "sqlite" in settings.DATABASE_URL else {}
+    is_memory_db = ":memory:" in settings.DATABASE_URL
+    engine = create_engine(
+        settings.DATABASE_URL,
+        echo=settings.ENV == "dev",
+        connect_args=connect_args,
+        poolclass=StaticPool if is_memory_db else None, 
+    )
 
-# 对于文件型 SQLite，不要使用 StaticPool，否则无法利用 WAL 的并发优势
-# 只有 :memory: 数据库才强制使用 StaticPool
-is_memory_db = ":memory:" in settings.DATABASE_URL
-
-engine = create_engine(
-    settings.DATABASE_URL,
-    echo=settings.ENV == "dev",
-    connect_args=connect_args,
-    poolclass=StaticPool if is_memory_db else None, 
-)
-
-# 启用 SQLite WAL 模式以提高并发性能
-if "sqlite" in settings.DATABASE_URL:
     from sqlalchemy import event
     @event.listens_for(engine, "connect")
     def set_sqlite_pragma(dbapi_connection, connection_record):

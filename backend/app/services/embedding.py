@@ -32,6 +32,8 @@ class EmbeddingService:
     async def _embed(self, texts: List[str], model_id: str = None) -> List[List[float]]:
         """调用 Embedding API"""
         target_model = model_id or self.model
+        if not target_model or target_model in ["sys_embedding", "default", "system"]:
+            target_model = settings.EMBEDDING_MODEL
         
         # 针对 Doubao 模型 (Volcengine) 的特殊处理
         # 1. 识别：通过模型名称或 URL 特征 (如 ark.cn-beijing.volces.com)
@@ -68,7 +70,7 @@ class EmbeddingService:
                 for i, text in enumerate(texts):
                     # 复用单个处理逻辑 (递归调用自己，但 ensure list)
                     # 注意：为了避免无限递归，这里我们直接构造单次请求
-                    async with httpx.AsyncClient(timeout=60.0, verify=False, trust_env=False) as client:
+                    async with httpx.AsyncClient(timeout=60.0, verify=False, trust_env=True) as client:
                         response = await client.post(
                             url,
                             headers={
@@ -92,7 +94,7 @@ class EmbeddingService:
                 return embeddings
 
             # 增加超时时间，并关闭 verify，禁用环境变量（代理）
-            async with httpx.AsyncClient(timeout=60.0, verify=False, trust_env=False) as client:
+            async with httpx.AsyncClient(timeout=60.0, verify=False, trust_env=True) as client:
                 # 构造请求体
                 req_json = {
                     "model": target_model,
@@ -104,8 +106,9 @@ class EmbeddingService:
                      # But above block handles batch > 1. So here len(texts) == 1
                      req_json["prompt"] = texts[0] if isinstance(texts, list) and texts else ""
                 else:
-                     # Standard /api/embed or OpenAI
-                     req_json["input"] = texts
+                     # Standard /api/embed or OpenAI (安全截断超长文本至 4000 字符，防止 API 报 20015 参数溢出)
+                     safe_texts = [t[:4000] if isinstance(t, str) and len(t) > 4000 else t for t in texts]
+                     req_json["input"] = safe_texts
 
                 response = await client.post(
                     url,

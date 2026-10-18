@@ -93,7 +93,7 @@ export const createChatStream = (
               console.log('Parsed Event:', currentEventType, eventData); // Debug logging
 
               // 尝试推断事件类型 (如果没有显式 eventType)
-              let inferredType = currentEventType;
+              let inferredType: string | null = currentEventType;
               if (!inferredType) {
                   if ('step' in eventData) inferredType = 'agent_thought';
                   else if ('citations' in eventData) inferredType = 'rag_result';

@@ -4,7 +4,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Card, Select, Button, Input, Spin, Collapse, Tag, message, Segmented, Slider, Divider, Space, Tooltip, Modal, Switch, Typography } from 'antd';
+import { Card, Select, Button, Input, Spin, Collapse, Tag, message, Segmented, Slider, Divider, Space, Tooltip, Modal, Switch, Typography, Popover } from 'antd';
 import {
   SendOutlined,
   StopOutlined,
@@ -569,18 +569,15 @@ const Chat: React.FC = () => {
             {citations.map((citation, index) => (
               <div key={index} className={styles.citationItem}>
                 <div className={styles.citationHeader}>
-                  <Tag color="orange">{citation.kb_name || '未知知识库'}</Tag>
+                  <Tag color="orange">{citation.kb_name || '知识库'}</Tag>
                   <Tooltip title={citation.fileId ? "点击查看文件详情" : "文件 ID 未知"}>
                       <Tag 
                         color="blue" 
                         style={{ cursor: citation.fileId ? 'pointer' : 'default' }}
                         onClick={() => {
                             if (citation.fileId && citation.kb_id) {
-                                // 新窗口打开或者跳转
-                                // navigate(`/kb/${citation.kb_id}/preview/${citation.fileId}`);
                                 window.open(`/kb/${citation.kb_id}/preview/${citation.fileId}`, '_blank');
                             } else if (citation.fileId && currentConfig.kbIds.length === 1) {
-                                // 如果 citation 没有 kb_id 但当前只选了一个知识库，尝试使用当前知识库
                                 window.open(`/kb/${currentConfig.kbIds[0]}/preview/${citation.fileId}`, '_blank');
                             }
                         }}
@@ -588,7 +585,9 @@ const Chat: React.FC = () => {
                         {citation.fileName || '未知文件'}
                       </Tag>
                   </Tooltip>
-                  <Tag>{citation.location || '未知位置'}</Tag>
+                  {citation.location && citation.location !== '未知位置' && (
+                    <Tag>{citation.location}</Tag>
+                  )}
                   <Tag color="green">相似度: {citation.score.toFixed(3)}</Tag>
                   {citation.rerank_score !== undefined && citation.rerank_score !== null && (
                       <Tag color="purple">Rerank: {citation.rerank_score.toFixed(3)}</Tag>
@@ -604,26 +603,52 @@ const Chat: React.FC = () => {
                     style={{ cursor: 'pointer' }}
                     title="点击查看完整内容"
                   >
-                    {citation.image_path ? (
-                        <div style={{ textAlign: 'center' }}>
-                            <img 
-                                src={`http://localhost:8000/static/images/${citation.image_path}`} 
-                                alt="引用图片" 
-                                style={{ maxWidth: '100%', maxHeight: '200px', objectFit: 'contain' }}
-                            />
-                        </div>
-                    ) : (
-                        // 修改：不截断内容，由 CSS 控制高度
-                        <div style={{
-                            display: '-webkit-box',
-                            WebkitLineClamp: 3,
-                            WebkitBoxOrient: 'vertical',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis'
-                        }}>
-                            {citation.content}
-                        </div>
-                    )}
+                    {(() => {
+                        const imgMatch = citation.content ? citation.content.match(/\[图片:\s*([^\]]+)\]/) : null;
+                        const imgPath = citation.image_path || (imgMatch ? imgMatch[1].trim() : null);
+
+                        if (imgPath) {
+                            const cleanImg = imgPath.replace(/^\/?static\/images\//, '').replace(/^\/+/, '');
+                            return (
+                                <div>
+                                    <div style={{ textAlign: 'center', marginBottom: 6 }}>
+                                        <img 
+                                            src={`http://localhost:8000/static/images/${cleanImg}`} 
+                                            alt="引用图片" 
+                                            style={{ maxWidth: '100%', maxHeight: '160px', objectFit: 'contain', borderRadius: 4 }}
+                                            onError={(e) => {
+                                                (e.target as HTMLElement).style.display = 'none';
+                                            }}
+                                        />
+                                    </div>
+                                    <div style={{
+                                        display: '-webkit-box',
+                                        WebkitLineClamp: 2,
+                                        WebkitBoxOrient: 'vertical',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        wordBreak: 'break-word',
+                                        fontSize: '12px'
+                                    }}>
+                                        {citation.content}
+                                    </div>
+                                </div>
+                            );
+                        }
+
+                        return (
+                            <div style={{
+                                display: '-webkit-box',
+                                WebkitLineClamp: 3,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                wordBreak: 'break-word'
+                            }}>
+                                {citation.content}
+                            </div>
+                        );
+                    })()}
                   </div>
                 )}
               </div>
@@ -643,12 +668,20 @@ const Chat: React.FC = () => {
         key={msg.id}
         className={`${styles.messageWrapper} ${isUser ? styles.userMessage : styles.assistantMessage}`}
       >
-        <div className={styles.messageContent}>
+        <div 
+          className={styles.messageContent}
+          style={!isUser ? { width: '860px', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' } : { maxWidth: '75%', minWidth: 0 }}
+        >
           {!isUser && msg.agentSteps && msg.agentSteps.length > 0 && (
-            renderAgentSteps(msg.agentSteps)
+            <div style={{ width: '100%' }}>
+              {renderAgentSteps(msg.agentSteps)}
+            </div>
           )}
 
-          <div className={styles.messageBubble}>
+          <div 
+            className={styles.messageBubble}
+            style={!isUser ? { width: '100%', boxSizing: 'border-box' } : { boxSizing: 'border-box' }}
+          >
             {msg.isStreaming && !msg.content ? (
               <div className={styles.thinking}>
                 <Spin size="small" />
@@ -672,10 +705,10 @@ const Chat: React.FC = () => {
           </div>
 
           {!isUser && (
-              <>
+              <div style={{ width: '100%' }}>
                   {msg.citations && renderCitations(msg.citations, msg.original_citations?.length ? "参考来源 (Rerank)" : "参考来源")}
                   {msg.original_citations && msg.original_citations.length > 0 && renderCitations(msg.original_citations, "初排结果 (Embedding)")}
-              </>
+              </div>
           )}
         </div>
       </div>
@@ -701,168 +734,198 @@ const Chat: React.FC = () => {
       />
 
       {/* 配置区 */}
-      <Card className={styles.configCard}>
-        <div className={styles.configRow}>
-          {chatMode === 'normal' && (
+      <Card className={styles.configCard} styles={{ body: { padding: '10px 18px' } }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'nowrap', gap: 16, overflowX: 'auto', width: '100%' }}>
+          {/* 左侧主要资源：知识库 + 模型 + Rerank */}
+          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'nowrap', gap: 14, flexShrink: 0 }}>
+            {/* 知识库选择 (Agent模式和普通模式均可见) */}
             <div className={styles.configItem}>
               <label>知识库</label>
               <Select
                 mode="multiple"
-                placeholder="选择知识库（可多选）"
+                placeholder={chatMode === 'agent' ? "全部知识库 (默认全库)" : "选择知识库 (可多选)"}
                 value={currentConfig.kbIds}
                 onChange={(val) => setCurrentConfig({ kbIds: val })}
-                style={{ width: 300 }}
+                style={{ width: 180 }}
+                maxTagCount="responsive"
+                allowClear
                 options={knowledgeBases.map((kb) => ({
                   value: kb.id,
                   label: kb.name,
                 }))}
               />
             </div>
-          )}
-          
-          <div className={styles.configItem}>
-            <label>模型</label>
-            <Select
-              showSearch
-              optionFilterProp="label"
-              placeholder="选择 LLM 模型"
-              value={selectedModel}
-              onChange={setSelectedModel}
-              style={{ width: 200 }}
-              options={(chatModels || []).map((m) => ({
-                value: m.id,
-                label: m.name,
-              }))}
-            />
-          </div>
-          
-          <Divider type="vertical" />
-          
-          <div className={styles.configItem} style={{ flex: 1, justifyContent: 'flex-end' }}>
-             <Space size="large">
-               {chatMode === 'normal' ? (
-                 <>
-                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                     <SettingOutlined />
-                     <span style={{ whiteSpace: 'nowrap' }}>Top K: {currentConfig.topK}</span>
-                     <Tooltip title={
-                        <div style={{ fontSize: '12px' }}>
-                            <div><b>策略：分库/分任务检索 + 汇总重排</b></div>
-                            <div style={{ marginTop: 4 }}>此处 Top K 指<b>单次检索/单知识库</b>的召回数量。</div>
-                            <div style={{ marginTop: 4 }}>系统会汇总所有检索结果（总量可能 &gt; Top K），再经 Rerank 优选出最终回答依据。</div>
-                        </div>
-                     }>
-                        <QuestionCircleOutlined style={{ color: '#999', cursor: 'help' }} />
-                     </Tooltip>
-                     <Slider 
-                              min={1} max={100} 
-                              value={currentConfig.topK}
-                              onChange={(val) => setCurrentConfig({ topK: val })}
-                              style={{ width: 100 }}
-                            />
-                   </div>
-                   
-                   <Divider type="vertical" style={{ height: 24 }} />
-                   
-                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                     <span style={{ whiteSpace: 'nowrap' }}>阈值: {currentConfig.scoreThreshold}</span>
-                     <Slider 
-                       min={0} max={1} step={0.1}
-                       value={currentConfig.scoreThreshold}
-                       onChange={(val) => setCurrentConfig({ scoreThreshold: val })}
-                       style={{ width: 100 }}
-                     />
-                   </div>
 
-                   <Divider type="vertical" style={{ height: 24 }} />
+            {/* LLM 模型 */}
+            <div className={styles.configItem}>
+              <label>模型</label>
+              <Select
+                showSearch
+                optionFilterProp="label"
+                placeholder="选择 LLM 模型"
+                value={selectedModel}
+                onChange={setSelectedModel}
+                style={{ width: 160 }}
+                options={(chatModels || []).map((m) => ({
+                  value: m.id,
+                  label: m.name,
+                }))}
+              />
+            </div>
 
-                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                     <Switch 
-                        checkedChildren="Rerank" 
-                        unCheckedChildren="Rerank"
-                        checked={currentConfig.rerankEnabled}
-                        onChange={(checked) => setCurrentConfig({ rerankEnabled: checked })}
-                     />
-                     {currentConfig.rerankEnabled && (
-                        <>
-                            <Select
-                                showSearch
-                                optionFilterProp="label"
-                                placeholder="选择 Rerank 模型"
-                                value={currentConfig.rerankModelId}
-                                onChange={(val) => setCurrentConfig({ rerankModelId: val })}
-                                style={{ width: 160 }}
-                                options={rerankModels.map((m) => ({
-                                    value: m.id,
-                                    label: m.name,
-                                }))}
-                            />
-                            <span style={{ whiteSpace: 'nowrap' }}>阈值: {currentConfig.rerankScoreThreshold}</span>
-                            <Slider
-                              min={0} max={1} step={0.01}
-                              value={currentConfig.rerankScoreThreshold}
-                              onChange={(val) => setCurrentConfig({ rerankScoreThreshold: val })}
-                              style={{ width: 100 }}
-                            />
-                            <span style={{ whiteSpace: 'nowrap' }}>Top: {currentConfig.rerankTopK}</span>
-                            <Slider
-                              min={5} max={50}
-                              value={currentConfig.rerankTopK}
-                              onChange={(val) => setCurrentConfig({ rerankTopK: val })}
-                              style={{ width: 80 }}
-                            />
-                        </>
-                     )}
-                   </div>
-
-                   <Divider type="vertical" style={{ height: 24 }} />
-
-                   {/* 检索模式 */}
-                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                     <Tooltip title="选择检索模式: 混合检索兼顾语义和关键词">
-                       <Segmented
-                         size="small"
-                         value={currentConfig.searchMode}
-                         onChange={(val) => setCurrentConfig({ searchMode: val as 'vector' | 'fulltext' | 'hybrid' })}
-                         options={[
-                           { label: '混合', value: 'hybrid' },
-                           { label: '向量', value: 'vector' },
-                           { label: 'BM25', value: 'fulltext' },
-                         ]}
-                       />
-                     </Tooltip>
-                     {currentConfig.searchMode === 'hybrid' && (
-                       <Tooltip title={`向量权重: ${(currentConfig.vectorWeight * 100).toFixed(0)}%`}>
-                         <Slider
-                           min={0} max={1} step={0.1}
-                           value={currentConfig.vectorWeight}
-                           onChange={(val) => setCurrentConfig({ vectorWeight: val, bm25Weight: 1 - val })}
-                           style={{ width: 60 }}
-                         />
-                       </Tooltip>
-                     )}
-                   </div>
-                 </>
-               ) : (
-                 // Agent Mode: 只显示 Rerank 模型选择（资源配置）
-                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <label>Rerank 模型</label>
+            {/* Rerank 配置 */}
+            <div className={styles.configItem}>
+              {chatMode === 'normal' ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Switch
+                    checkedChildren="Rerank"
+                    unCheckedChildren="Rerank"
+                    checked={currentConfig.rerankEnabled}
+                    onChange={(checked) => setCurrentConfig({ rerankEnabled: checked })}
+                  />
+                  {currentConfig.rerankEnabled && (
                     <Select
-                        placeholder="选择 Rerank 模型"
-                        value={currentConfig.rerankModelId}
-                        onChange={(val) => setCurrentConfig({ rerankModelId: val })}
-                        style={{ width: 200 }}
-                        options={rerankModels.map((m) => ({
-                            value: m.id,
-                            label: m.name,
-                        }))}
+                      showSearch
+                      optionFilterProp="label"
+                      placeholder="选择 Rerank 模型"
+                      value={currentConfig.rerankModelId}
+                      onChange={(val) => setCurrentConfig({ rerankModelId: val })}
+                      style={{ width: 160 }}
+                      options={rerankModels.map((m) => ({
+                        value: m.id,
+                        label: m.name,
+                      }))}
                     />
-                    <Tooltip title="Agent 模式下，系统将自动决定是否使用 Rerank 以及其他检索参数。">
-                        <QuestionCircleOutlined style={{ color: '#999', cursor: 'help' }} />
-                    </Tooltip>
-                 </div>
-               )}
-             </Space>
+                  )}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <label>Rerank 模型</label>
+                  <Select
+                    showSearch
+                    optionFilterProp="label"
+                    placeholder="选择 Rerank 模型"
+                    value={currentConfig.rerankModelId}
+                    onChange={(val) => setCurrentConfig({ rerankModelId: val })}
+                    style={{ width: 170 }}
+                    options={rerankModels.map((m) => ({
+                      value: m.id,
+                      label: m.name,
+                    }))}
+                  />
+                  <Tooltip title="Agent 模式下，系统将自主结合意图与上下文，按需调用混合检索并进行重排">
+                    <QuestionCircleOutlined style={{ color: '#999', cursor: 'help' }} />
+                  </Tooltip>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 右侧检索策略与调优按钮 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+            {chatMode === 'normal' ? (
+              <Popover
+                trigger="click"
+                placement="bottomRight"
+                title="检索与重排高级调优"
+                content={
+                  <div style={{ width: 310, padding: '4px 0' }}>
+                    {/* 检索模式切换 */}
+                    <div style={{ marginBottom: 14 }}>
+                      <div style={{ fontSize: '13px', fontWeight: 500, marginBottom: 6 }}>检索模式</div>
+                      <Segmented
+                        block
+                        size="middle"
+                        value={currentConfig.searchMode}
+                        onChange={(val) => setCurrentConfig({ searchMode: val as 'vector' | 'fulltext' | 'hybrid' })}
+                        options={[
+                          { label: '混合检索', value: 'hybrid' },
+                          { label: '纯向量', value: 'vector' },
+                          { label: 'BM25 全文', value: 'fulltext' },
+                        ]}
+                      />
+                    </div>
+
+                    <Divider style={{ margin: '10px 0' }} />
+
+                    <div style={{ marginBottom: 14 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span style={{ fontSize: '13px' }}>粗筛召回 Top K</span>
+                        <span style={{ color: '#1677ff', fontWeight: 600 }}>{currentConfig.topK}</span>
+                      </div>
+                      <Slider
+                        min={1} max={50}
+                        value={currentConfig.topK}
+                        onChange={(val) => setCurrentConfig({ topK: val })}
+                      />
+                    </div>
+
+                    <div style={{ marginBottom: 14 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span style={{ fontSize: '13px' }}>相似度过滤阈值</span>
+                        <span style={{ color: '#1677ff', fontWeight: 600 }}>{currentConfig.scoreThreshold}</span>
+                      </div>
+                      <Slider
+                        min={0} max={1} step={0.05}
+                        value={currentConfig.scoreThreshold}
+                        onChange={(val) => setCurrentConfig({ scoreThreshold: val })}
+                      />
+                    </div>
+
+                    {currentConfig.searchMode === 'hybrid' && (
+                      <div style={{ marginBottom: 14 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <span style={{ fontSize: '13px' }}>向量权重</span>
+                          <span style={{ color: '#1677ff', fontWeight: 600 }}>{(currentConfig.vectorWeight * 100).toFixed(0)}% (BM25: {((1 - currentConfig.vectorWeight) * 100).toFixed(0)}%)</span>
+                        </div>
+                        <Slider
+                          min={0} max={1} step={0.1}
+                          value={currentConfig.vectorWeight}
+                          onChange={(val) => setCurrentConfig({ vectorWeight: val, bm25Weight: 1 - val })}
+                        />
+                      </div>
+                    )}
+
+                    {currentConfig.rerankEnabled && (
+                      <>
+                        <Divider style={{ margin: '10px 0' }} />
+                        <div style={{ marginBottom: 14 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <span style={{ fontSize: '13px' }}>Rerank 过滤阈值</span>
+                            <span style={{ color: '#722ed1', fontWeight: 600 }}>{currentConfig.rerankScoreThreshold}</span>
+                          </div>
+                          <Slider
+                            min={0} max={1} step={0.01}
+                            value={currentConfig.rerankScoreThreshold}
+                            onChange={(val) => setCurrentConfig({ rerankScoreThreshold: val })}
+                          />
+                        </div>
+
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <span style={{ fontSize: '13px' }}>Rerank 重排 Top</span>
+                            <span style={{ color: '#722ed1', fontWeight: 600 }}>{currentConfig.rerankTopK}</span>
+                          </div>
+                          <Slider
+                            min={1} max={30}
+                            value={currentConfig.rerankTopK}
+                            onChange={(val) => setCurrentConfig({ rerankTopK: val })}
+                          />
+                        </div>
+                      </>
+                    )}
+                  </div>
+                }
+              >
+                <Button icon={<SettingOutlined />} size="middle">
+                  检索参数 ({currentConfig.searchMode === 'hybrid' ? '混合' : currentConfig.searchMode === 'vector' ? '向量' : 'BM25'} · Top {currentConfig.topK})
+                </Button>
+              </Popover>
+            ) : (
+              <Tag color="blue" style={{ fontSize: '13px', padding: '4px 10px', borderRadius: '4px' }}>
+                ⚡ 自动意图分析与动态检索编排
+              </Tag>
+            )}
           </div>
         </div>
       </Card>
@@ -891,68 +954,87 @@ const Chat: React.FC = () => {
 
         {/* 输入区 */}
         <div className={styles.inputArea}>
-          <div className={styles.inputToolbar} style={{ marginBottom: 8, display: 'flex', justifyContent: 'flex-end' }}>
-             <Tooltip title="清除上下文（开启新对话）">
-                <Button 
+          <div className={styles.inputWrapper}>
+            <Input.TextArea
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              placeholder={chatMode === 'agent' ? "输入问题，Agent 将为您深入思考与检索... (Enter 发送，Shift+Enter 换行)" : "输入问题... (Enter 发送，Shift+Enter 换行)"}
+              autoSize={{ minRows: 2, maxRows: 5 }}
+              onPressEnter={(e) => {
+                if (!e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              disabled={isGenerating}
+              className={styles.inputField}
+            />
+            <div className={styles.inputBottomBar}>
+              {/* 左侧操作：清除上下文 */}
+              <div className={styles.inputLeftActions}>
+                <Tooltip title="清除当前会话历史，开启全新问答（避免旧上下文干扰）">
+                  <Button 
                     type="text"
+                    size="small"
                     icon={<DeleteOutlined />} 
                     onClick={() => {
-                        Modal.confirm({
-                            title: '确认清除上下文？',
-                            content: '清除后将开始新的对话，之前的记忆将丢失。',
-                            onOk: clearMessages,
-                        });
+                      Modal.confirm({
+                        title: '确认清除上下文？',
+                        content: '清除后将开始新的对话，当前会话的上下文记忆将被清空。',
+                        okText: '确认清除',
+                        cancelText: '取消',
+                        onOk: clearMessages,
+                      });
                     }}
-                >
+                    style={{ color: 'var(--text-secondary)' }}
+                  >
                     清除上下文
-                </Button>
-            </Tooltip>
-          </div>
-          <Input.TextArea
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            placeholder={chatMode === 'agent' ? "输入问题，Agent 将为您思考..." : "输入问题..."}
-            autoSize={{ minRows: 1, maxRows: 4 }}
-            onPressEnter={(e) => {
-              if (!e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-            disabled={isGenerating}
-            className={styles.input}
-          />
-          <div className={styles.inputActions}>
-            {chatMode === 'normal' && (
-              <Button
-                icon={<EditOutlined />}
-                onClick={handleRewrite}
-                loading={rewriting}
-                disabled={!inputValue.trim() || isGenerating}
-              >
-                改写
-              </Button>
-            )}
-            
-            {isGenerating ? (
-              <Button
-                type="primary"
-                danger
-                icon={<StopOutlined />}
-                onClick={handleStop}
-              >
-                停止
-              </Button>
-            ) : (
-              <Button
-                type="primary"
-                icon={<SendOutlined />}
-                onClick={handleSend}
-                disabled={!inputValue.trim()}
-              >
-                发送
-              </Button>
-            )}
+                  </Button>
+                </Tooltip>
+                {messages.length > 0 && (
+                  <span style={{ fontSize: '12px', color: '#999', marginLeft: 8 }}>
+                    共 {messages.length} 条对话
+                  </span>
+                )}
+              </div>
+
+              {/* 右侧操作：改写 + 发送 */}
+              <div className={styles.inputRightActions}>
+                <Tooltip title="调用 LLM 优化输入提问，使表述更清晰、检索更精准">
+                  <Button
+                    size="small"
+                    icon={<EditOutlined />}
+                    onClick={handleRewrite}
+                    loading={rewriting}
+                    disabled={!inputValue.trim() || isGenerating}
+                  >
+                    改写
+                  </Button>
+                </Tooltip>
+                
+                {isGenerating ? (
+                  <Button
+                    type="primary"
+                    danger
+                    size="small"
+                    icon={<StopOutlined />}
+                    onClick={handleStop}
+                  >
+                    停止
+                  </Button>
+                ) : (
+                  <Button
+                    type="primary"
+                    size="small"
+                    icon={<SendOutlined />}
+                    onClick={handleSend}
+                    disabled={!inputValue.trim()}
+                  >
+                    发送
+                  </Button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </Card>

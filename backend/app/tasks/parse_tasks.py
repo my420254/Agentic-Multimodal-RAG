@@ -3,7 +3,7 @@
 """
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlmodel import Session, select
 
 from app.tasks.celery_app import celery_app
@@ -76,7 +76,7 @@ def process_submitted_chunks(file_id: str, chunks_data: list, vector_model: str 
             # 更新状态为处理中
             file_doc.status = FileStatus.EMBEDDING # 直接进入 Embedding 阶段，因为已经 Parse 过了
             file_doc.progress = 10
-            file_doc.updated_at = datetime.utcnow()
+            file_doc.updated_at = datetime.now(timezone.utc)
             session.add(file_doc)
             safe_commit(session)
 
@@ -157,12 +157,15 @@ def process_submitted_chunks(file_id: str, chunks_data: list, vector_model: str 
 
                 # 关键修复：如果传入了 vector_model 且与当前 KB 配置不同（或是首次设置），则立即更新 KB 配置
                 # 这样确保后续流程（如召回）能立即感知到模型变更
-                if vector_model and vector_model != kb.embedding_model:
-                    print(f"🔄 [SubmitTask] 更新知识库 {kb.id} 的 Embedding 模型: {kb.embedding_model} -> {vector_model}")
-                    
-                    # ⚠️ 警告：模型变更通常意味着维度变更，必须重建 Collection
-                    # 否则会报 "Collection expecting embedding with dimension X, got Y"
-                    print(f"⚠️ [SubmitTask] 检测到模型变更，正在删除旧的 ChromaDB Collection 以避免维度冲突...")
+                def _canonical_name(m_id):
+                    if not m_id or m_id in ["sys_embedding", "default", "system"]:
+                        return settings.EMBEDDING_MODEL
+                    cm = session.get(CustomModel, m_id)
+                    return cm.model_name if cm else m_id
+
+                if vector_model and _canonical_name(vector_model) != _canonical_name(kb.embedding_model):
+                    print(f"🔄 [SubmitTask] 检测到底层 Embedding 模型实质变更: {_canonical_name(kb.embedding_model)} -> {_canonical_name(vector_model)}")
+                    print(f"⚠️ [SubmitTask] 正在重建 ChromaDB Collection 以避免维度冲突...")
                     try:
                         vector_service = VectorStoreService()
                         vector_service.delete_collection(file_doc.kb_id)
@@ -170,6 +173,7 @@ def process_submitted_chunks(file_id: str, chunks_data: list, vector_model: str 
                     except Exception as e:
                         print(f"⚠️ [SubmitTask] 删除旧 Collection 失败 (可能不存在): {e}")
 
+                if vector_model and vector_model != kb.embedding_model:
                     kb.embedding_model = vector_model
                     session.add(kb)
                     safe_commit(session)
@@ -192,8 +196,14 @@ def process_submitted_chunks(file_id: str, chunks_data: list, vector_model: str 
                     # 使用实际模型名称覆盖 ID
                     embedding_model_id = custom_model.model_name
                 else:
-                    print(f"🔍 [ParseTask] Using System/Default Model: {embedding_model_id}")
-                    embedding_service = EmbeddingService()
+                    real_model = settings.EMBEDDING_MODEL
+                    print(f"🔍 [ParseTask] Using System/Default Model: {real_model}")
+                    embedding_service = EmbeddingService(
+                        base_url=settings.EMBEDDING_BASE_URL,
+                        api_key=settings.EMBEDDING_API_KEY,
+                        model=real_model
+                    )
+                    embedding_model_id = real_model
 
                 vector_service = VectorStoreService()
 
@@ -242,7 +252,7 @@ def process_submitted_chunks(file_id: str, chunks_data: list, vector_model: str 
 
                 if selected_model_id and kb.embedding_model != selected_model_id:
                     kb.embedding_model = selected_model_id
-                    kb.updated_at = datetime.utcnow()
+                    kb.updated_at = datetime.now(timezone.utc)
                     session.add(kb)
                     safe_commit(session)
                     print(f"✅ [SubmitTask] 已更新知识库 embedding_model 为 {selected_model_id}")
@@ -258,7 +268,7 @@ def process_submitted_chunks(file_id: str, chunks_data: list, vector_model: str 
             if file_doc:
                 file_doc.status = FileStatus.PARSED
                 file_doc.progress = 100
-                file_doc.updated_at = datetime.utcnow()
+                file_doc.updated_at = datetime.now(timezone.utc)
                 session.add(file_doc)
                 safe_commit(session)
 
@@ -275,7 +285,7 @@ def process_submitted_chunks(file_id: str, chunks_data: list, vector_model: str 
                         ).one()
                         
                         kb.chunk_count = total_chunks
-                        kb.updated_at = datetime.utcnow()
+                        kb.updated_at = datetime.now(timezone.utc)
                         session.add(kb)
                         safe_commit(session)
                         print(f"✅ [SubmitTask] 更新知识库 {kb.id} 的 chunk_count 为 {total_chunks}")
@@ -350,7 +360,7 @@ def process_file_parsing(
             # 更新状态为解析中
             file_doc.status = FileStatus.PARSING
             file_doc.progress = 0
-            file_doc.updated_at = datetime.utcnow()
+            file_doc.updated_at = datetime.now(timezone.utc)
             session.add(file_doc)
             safe_commit(session)
             
@@ -492,7 +502,7 @@ def process_file_parsing(
             # 更新文件状态为解析完成 (PENDING_CONFIRM)
             file_doc.status = FileStatus.PENDING_CONFIRM
             file_doc.progress = 50
-            file_doc.updated_at = datetime.utcnow()
+            file_doc.updated_at = datetime.now(timezone.utc)
             session.add(file_doc)
             
             # 暂时不更新知识库分块计数，因为还未入库
@@ -542,7 +552,7 @@ def process_file_parsing(
             if file_doc:
                 file_doc.status = FileStatus.FAILED
                 file_doc.error_message = str(e)
-                file_doc.updated_at = datetime.utcnow()
+                file_doc.updated_at = datetime.now(timezone.utc)
                 session.add(file_doc)
                 safe_commit(session)
             

@@ -15,10 +15,12 @@ interface ParseModalProps {
 }
 
 export interface ParseConfig {
-  chunk_mode: 'custom' | 'no_split' | 'structure' | 'semantic';  // 新增 structure 模式
+  chunk_mode?: 'custom' | 'no_split' | 'structure' | 'semantic';  // 新增 structure 模式
   chunk_size?: number;
   chunk_overlap?: number;
   separator?: string;
+  separators?: string[];
+  chunking_mode?: string;
   // structure 模式专用
   heading_level?: 1 | 2 | 3;  // 按哪个级别拆分
   embedding_model?: string;   // 语义切分模型
@@ -36,9 +38,9 @@ const ParseModal: React.FC<ParseModalProps> = ({
   const [form] = Form.useForm();
   const [chunkMode, setChunkMode] = useState<'custom' | 'no_split' | 'structure' | 'semantic'>('custom');
 
-  // 过滤 embedding 模型，并排除 sys_embedding
+  // 过滤 embedding 模型（保留系统预设云端模型与自定义模型）
   const embeddingModels = models.filter(m => 
-    (m.type === 'embedding' || m.model_type === 'embedding') && m.id !== 'sys_embedding'
+    m.type === 'embedding' || m.model_type === 'embedding'
   );
 
   const handleValuesChange = (changedValues: any) => {
@@ -149,13 +151,13 @@ const ParseModal: React.FC<ParseModalProps> = ({
               </Text>
             </Form.Item>
 
-            {/* 隐藏最大块大小设置，使用默认值 1000 */}
-            <Form.Item name="chunk_size" noStyle initialValue={1000}>
+            {/* 隐藏最大块大小设置 */}
+            <Form.Item name="chunk_size" noStyle>
                <InputNumber style={{ display: 'none' }} />
             </Form.Item>
             
             {/* 结构化切分模式下隐藏重叠大小设置 */}
-            <Form.Item name="chunk_overlap" noStyle initialValue={0}>
+            <Form.Item name="chunk_overlap" noStyle>
                <InputNumber style={{ display: 'none' }} />
             </Form.Item>
 

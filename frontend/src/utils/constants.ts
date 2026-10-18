@@ -16,6 +16,7 @@ export const FILE_STATUS_CONFIG: Record<
   embedding: { label: '向量化中', color: 'processing' }, // 后端返回的是 embedding
   ready: { label: '已入库', color: 'success' }, // 后端返回的是 ready
   failed: { label: '失败', color: 'error' },
+  deleted: { label: '已删除', color: 'default' },
 };
 
 /** 支持的文件类型 */

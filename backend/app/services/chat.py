@@ -12,6 +12,9 @@ from app.services.vector_store import VectorStoreService
 from app.services.rerank import RerankService, batch_rerank, expand_context
 from app.services.retrieval import get_retrieval_service
 from app.services.agent_workflow import AgentWorkflow
+from app.services.memory_service import MemoryService
+from app.services.prompt_service import prompt_service
+from app.services.lora_service import lora_service
 from langchain_core.messages import HumanMessage, AIMessage
 from sqlmodel import Session, select
 from app.core.database import engine
@@ -29,7 +32,7 @@ settings = get_settings()
 
 
 class ChatService:
-    """对话服务"""
+    """对话服务 (集成多路检索、三态熔断与分层记忆体系)"""
 
     def __init__(self):
         self.llm_service = LLMService()
@@ -37,6 +40,7 @@ class ChatService:
         self.vector_service = VectorStoreService()
         self.retrieval_service = get_retrieval_service()
         self.agent_workflow = AgentWorkflow()
+        self.memory_service = MemoryService()
 
     async def _retrieve_with_new_service(
         self,
@@ -229,6 +233,8 @@ class ChatService:
         rerank_top_k: int = 20,
         context_window: int = 1,
         use_rewrite: bool = False,
+        session_id: str = None,
+        user_id: str = "default_user",
     ) -> AsyncGenerator[Tuple[str, Dict[str, Any]], None]:
         """
         普通模式：
@@ -236,7 +242,7 @@ class ChatService:
         2. 如果指定了知识库 -> RAG (混合检索 -> Rerank -> 上下文扩展 -> Generate)
         """
         total_start_time = time.time()
-        print(f"DEBUG_CHAT: Start _chat_stream_normal. KBs: {kb_ids}, Mode: {search_mode}, TopK: {top_k}, Rewrite: {use_rewrite}", flush=True)
+        print(f"DEBUG_CHAT: Start _chat_stream_normal. KBs: {kb_ids}, Mode: {search_mode}, TopK: {top_k}, Rewrite: {use_rewrite}, Session: {session_id}", flush=True)
 
         # Get user message
         user_message = None
@@ -249,10 +255,17 @@ class ChatService:
             yield ("error", {"message": "没有找到用户消息"})
             return
 
+        # 写入 L1 短期活跃记忆
+        if session_id:
+            try:
+                self.memory_service.add_message(session_id, "user", user_message)
+            except Exception as e:
+                print(f"DEBUG_MEMORY: Write L1 memory failed: {e}")
+
         # Prepare LLM Service
         current_llm_service = self.llm_service
-        actual_model_id = model_id
-        if model_id:
+        actual_model_id = settings.LLM_MODEL
+        if model_id and model_id not in ["sys_llm", "default", "system"]:
             with Session(engine) as session:
                 custom_llm = session.get(CustomModel, model_id)
                 if custom_llm:
@@ -262,6 +275,8 @@ class ChatService:
                         model=custom_llm.model_name
                     )
                     actual_model_id = custom_llm.model_name
+                else:
+                    actual_model_id = model_id
 
         # Case 1: No Knowledge Base selected -> Direct Chat
         if not kb_ids:
@@ -399,14 +414,27 @@ class ChatService:
             context_parts.append(f"[{i}] 来源: {r.get('file_name', '未知')}\n{r.get('content', '')}")
         context = "\n\n".join(context_parts) if context_parts else "未找到相关信息"
 
-        system_prompt = f"""你是一个智能问答助手，请根据以下参考资料回答用户的问题。
-参考资料：
-{context}
-要求：
-1. 基于参考资料回答，如果资料中没有相关信息，请如实说明
-2. 回答要准确、完整、有条理
-3. 适当引用来源（如"根据文档..."）
-4. 使用中文回答"""
+        # 1. 动态 LoRA 适配器路由 (基于意图精准挂载: SRE排障 / SQL诊断 / 安全合规)
+        active_lora = lora_service.route_adapter_by_query(user_message)
+        yield ("agent_thought", {
+            "step": "lora_route",
+            "content": f"动态 LoRA 适配器路由: [{active_lora}] (HiPro-LoRA 层次化特征对齐)"
+        })
+
+        # 2. 提示词工程：动态组装包含角色定义、CoT、XML上下文强隔离、动态Few-Shot与分层记忆的生产提示词
+        user_prof = self.memory_service.get_user_profile(user_id) if session_id else None
+        conv_sum = self.memory_service.get_summary(session_id) if session_id else None
+        system_prompt = prompt_service.build_system_prompt(
+            rag_context=context,
+            user_query=user_message,
+            user_profile=user_prof,
+            conversation_summary=conv_sum,
+            enable_few_shots=True
+        )
+        yield ("agent_thought", {
+            "step": "thinking",
+            "content": f"🛠️ [提示词工程与上下文装配完成]\n• XML 标签隔离: <system_role>, <security_guardrails>, <reasoning_workflow>, <retrieved_context>, <memory_context>\n• 动态 Few-Shot: 已按意图注入生产黄金 CoT 排障案例\n• 记忆上下文: L2会话摘要 ({'已注入' if conv_sum else '无'}) | L3用户偏好 ({'已注入' if user_prof else '无'})\n• 装配提示词预览:\n{system_prompt[:320]}..."
+        })
 
         chat_messages = [{"role": msg.role.value, "content": msg.content} for msg in messages]
 
@@ -438,17 +466,28 @@ class ChatService:
                     new_content.append({"type": "image_url", "image_url": {"url": img_data}})
                 last_msg['content'] = new_content
 
+        accumulated_chunks = []
         try:
             async for chunk in current_llm_service.generate_stream(
                 messages=chat_messages,
                 system_prompt=system_prompt,
                 model_id=actual_model_id,
             ):
+                accumulated_chunks.append(chunk)
                 yield ("answer_chunk", {"content": chunk})
         except Exception as e:
             print(f"DEBUG_CHAT: Chat generation failed: {e}")
             yield ("error", {"error": f"生成回答失败: {str(e)}"})
             return
+
+        # 会话流式输出完成，持久化 Assistant 消息到 L1 并检查 L2 摘要压缩
+        if session_id and accumulated_chunks:
+            full_reply = "".join(accumulated_chunks)
+            try:
+                self.memory_service.add_message(session_id, "assistant", full_reply)
+                self.memory_service.update_summary_if_needed(session_id, current_llm_service)
+            except Exception as e:
+                print(f"DEBUG_MEMORY: Update L1/L2 memory failed: {e}")
 
         total_duration = time.time() - total_start_time
         yield ("agent_thought", {
@@ -498,7 +537,7 @@ class ChatService:
 
         # 1.5 获取模型配置
         model_config = {}
-        if model_id:
+        if model_id and model_id not in ["sys_llm", "default", "system"]:
             with Session(engine) as session:
                 custom_llm = session.get(CustomModel, model_id)
                 if custom_llm:
@@ -506,6 +545,10 @@ class ChatService:
                         "base_url": custom_llm.base_url,
                         "api_key": custom_llm.api_key,
                         "model_id": custom_llm.model_name
+                    }
+                else:
+                    model_config = {
+                        "model_id": model_id
                     }
 
         # 构造检索参数
@@ -542,6 +585,16 @@ class ChatService:
         # 3. 执行并流式输出
         last_citations = []
         has_streamed = False
+        accumulated_chunks = []
+
+        session_id = kwargs.get("session_id")
+        if session_id and langchain_messages:
+            last_human = [m.content for m in langchain_messages if isinstance(m, HumanMessage)]
+            if last_human:
+                try:
+                    self.memory_service.add_message(session_id, "user", str(last_human[-1]))
+                except Exception as e:
+                    print(f"DEBUG_MEMORY: Write L1 memory in langgraph failed: {e}")
         
         try:
             async for event in workflow.app.astream_events(initial_state, version="v1"):
@@ -563,6 +616,7 @@ class ChatService:
                         chunk = data.get("chunk")
                         if chunk and chunk.content:
                             yield ("answer_chunk", {"content": chunk.content})
+                            accumulated_chunks.append(chunk.content)
                             has_streamed = True
                 
                 # 3.2 监听 Node 输出 (Thinking/Decision/Action)
@@ -599,6 +653,7 @@ class ChatService:
                                         # 只有当有内容且没有工具调用时才发送
                                         if content and not tool_calls:
                                              yield ("answer_chunk", {"content": content})
+                                             accumulated_chunks.append(content)
                                              has_streamed = True # 避免重复
                             
                             # 处理 citations (只有变化时才发送)
@@ -616,6 +671,16 @@ class ChatService:
         except Exception as e:
             print(f"LangGraph Error: {e}")
             yield ("error", {"error": f"Agent 执行出错: {str(e)}"})
+
+        # 持久化 Agent 最终回答到 L1 并检查 L2 摘要压缩
+        session_id = kwargs.get("session_id")
+        if session_id and accumulated_chunks:
+            full_reply = "".join(accumulated_chunks)
+            try:
+                self.memory_service.add_message(session_id, "assistant", full_reply)
+                self.memory_service.update_summary_if_needed(session_id, self.llm_service)
+            except Exception as e:
+                print(f"DEBUG_MEMORY: Update L1/L2 memory in agent mode failed: {e}")
             
         yield ("done", {"usage": {}})
 
@@ -636,6 +701,8 @@ class ChatService:
         bm25_weight: float = 0.3,
         rerank_top_k: int = 20,
         context_window: int = 1,
+        session_id: str = None,
+        user_id: str = "default_user",
     ) -> AsyncGenerator[Tuple[str, Dict[str, Any]], None]:
         """
         流式对话
@@ -656,9 +723,11 @@ class ChatService:
             bm25_weight: BM25 权重
             rerank_top_k: Rerank 返回数量
             context_window: 上下文窗口大小
+            session_id: 会话 ID (用于分层记忆关联)
+            user_id: 用户 ID (用于长效画像关联)
         """
         import sys
-        print(f"DEBUG_CHAT: Start chat_stream. Mode: {mode}, SearchMode: {search_mode}, TopK: {top_k}", flush=True)
+        print(f"DEBUG_CHAT: Start chat_stream. Mode: {mode}, SearchMode: {search_mode}, TopK: {top_k}, Session: {session_id}", flush=True)
         sys.stdout.flush()
 
         if mode == "agent":
@@ -676,7 +745,9 @@ class ChatService:
                 vector_weight=vector_weight,
                 bm25_weight=bm25_weight,
                 rerank_top_k=rerank_top_k,
-                context_window=context_window
+                context_window=context_window,
+                session_id=session_id,
+                user_id=user_id,
             ):
                 yield item
         else:
@@ -696,5 +767,7 @@ class ChatService:
                 rerank_top_k=rerank_top_k,
                 context_window=context_window,
                 use_rewrite=use_rewrite,
+                session_id=session_id,
+                user_id=user_id,
             ):
                 yield item

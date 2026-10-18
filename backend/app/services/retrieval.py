@@ -14,7 +14,7 @@ import time
 import hashlib
 import json
 from typing import List, Dict, Any, Optional, Literal, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlmodel import Session, select
 
@@ -552,12 +552,14 @@ class RetrievalService:
 
             # 构建位置信息
             loc_parts = []
-            if chunk.page_number:
+            if chunk.page_number and chunk.page_number > 0:
                 loc_parts.append(f"第 {chunk.page_number} 页")
             if chunk.heading_text:
                 loc_parts.append(f"章节: {chunk.heading_text}")
+            if not loc_parts:
+                loc_parts.append(f"分块 #{chunk.original_index + 1}" if chunk.original_index is not None else "正文片段")
             
-            location_info = " | ".join(loc_parts) if loc_parts else "未知位置"
+            location_info = " | ".join(loc_parts)
 
             enriched.append({
                 "id": chunk_id,
@@ -629,7 +631,7 @@ class RetrievalService:
                 vector_weight=vector_weight,
                 bm25_weight=bm25_weight,
                 results_summary=json.dumps(summary, ensure_ascii=False),
-                created_at=datetime.utcnow()
+                created_at=datetime.now(timezone.utc)
             )
 
             session.add(log)

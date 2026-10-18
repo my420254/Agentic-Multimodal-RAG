@@ -33,13 +33,15 @@ export interface Citation {
 }
 
 /** Agent 思考步骤类型 */
-export type AgentStepType = 'thinking' | 'decision' | 'action' | 'response' | 'observation' | 'reflection';
+export type AgentStepType = 'thinking' | 'decision' | 'action' | 'response' | 'observation' | 'reflection' | 'lora_route' | string;
 
 /** Agent 思考步骤 */
 export interface AgentStep {
   type: AgentStepType;
   content: string;
   timestamp: string;
+  duration?: number;
+  cost?: number;
 }
 
 /** 对话会话 */
@@ -76,6 +78,7 @@ export interface ChatRequest {
 /** 问题改写请求 */
 export interface RewriteRequest {
   query: string;
+  model_id?: string;
 }
 
 /** 问题改写响应 */
@@ -90,6 +93,8 @@ export type SSEEventType = 'agent_thought' | 'rag_result' | 'answer_chunk' | 'do
 export interface AgentThoughtData {
   step: AgentStepType;
   content: string;
+  duration?: number;
+  cost?: number;
 }
 
 /** SSE RAG结果事件数据 */

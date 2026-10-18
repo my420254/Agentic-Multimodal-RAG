@@ -154,10 +154,14 @@ async def search_knowledge_base(
             
             citations.append({
                 "fileName": source,
+                "fileId": r.get("file_id"),
                 "kb_name": kb_name,
+                "kb_id": r.get("kb_id"),
                 "score": score,
+                "rerank_score": r.get("rerank_score"),
                 "content": content,
                 "chunk_id": r.get("id"),
+                "image_path": r.get("image_path"),
                 "location": r.get("location_info", "")
             })
             

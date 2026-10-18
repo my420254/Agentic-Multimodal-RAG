@@ -9,6 +9,7 @@ import {
   DatabaseOutlined,
   MessageOutlined,
   SettingOutlined,
+  RocketOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import styles from './Sidebar.module.css';
@@ -17,9 +18,14 @@ type MenuItem = Required<MenuProps>['items'][number];
 
 const menuItems: MenuItem[] = [
   {
+    key: '/career',
+    icon: <RocketOutlined />,
+    label: '智能求职与模拟面试',
+  },
+  {
     key: '/kb',
     icon: <DatabaseOutlined />,
-    label: '知识库管理',
+    label: '学生与岗位知识库',
   },
   {
     key: '/chat',
@@ -40,10 +46,11 @@ const Sidebar: React.FC = () => {
   // 根据当前路径获取选中的菜单项
   const getSelectedKey = () => {
     const { pathname } = location;
+    if (pathname.startsWith('/career')) return '/career';
     if (pathname.startsWith('/kb')) return '/kb';
     if (pathname.startsWith('/chat')) return '/chat';
     if (pathname.startsWith('/settings')) return '/settings';
-    return '/kb';
+    return '/career';
   };
 
   const handleMenuClick: MenuProps['onClick'] = ({ key }) => {
@@ -54,10 +61,11 @@ const Sidebar: React.FC = () => {
     <aside className={styles.sidebar}>
       <div className={styles.logo}>
         <div className={styles.logoIcon}>
-          <DatabaseOutlined />
+          <RocketOutlined />
         </div>
-        <span className={styles.logoText}>AgentRAG</span>
+        <span className={styles.logoText}>辽大·求职Agent</span>
       </div>
+
 
       <Menu
         mode="inline"

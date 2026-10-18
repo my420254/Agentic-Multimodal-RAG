@@ -38,6 +38,7 @@ const ChunkPreview = lazy(() => import('@/pages/KnowledgeBase/ChunkPreview'));
 const MultiFilePreview = lazy(() => import('@/pages/KnowledgeBase/MultiFilePreview'));
 const Chat = lazy(() => import('@/pages/Chat'));
 const Settings = lazy(() => import('@/pages/Settings'));
+const CareerCenter = lazy(() => import('@/pages/CareerCenter'));
 
 // 加载中组件
 const PageLoading = () => (
@@ -114,6 +115,14 @@ const router = createBrowserRouter([
         ),
       },
       {
+        path: 'career',
+        element: (
+          <LazyComponent>
+            <CareerCenter />
+          </LazyComponent>
+        ),
+      },
+      {
         path: 'settings',
         element: (
           <LazyComponent>
@@ -124,5 +133,6 @@ const router = createBrowserRouter([
     ],
   },
 ]);
+
 
 export default router;

@@ -13,7 +13,7 @@ import json
 import math
 from collections import Counter
 from typing import List, Dict, Any, Optional, Set
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlmodel import Session, select, delete
 
@@ -394,7 +394,7 @@ class BM25Index:
                 total_docs=1,
                 avg_doc_length=float(doc_length),
                 term_doc_freq=json.dumps({t: 1 for t in term_freq.keys()}, ensure_ascii=False),
-                updated_at=datetime.utcnow()
+                updated_at=datetime.now(timezone.utc)
             )
             session.add(stats)
         else:
@@ -414,7 +414,7 @@ class BM25Index:
                 old_term_doc_freq[term] = old_term_doc_freq.get(term, 0) + 1
 
             stats.term_doc_freq = json.dumps(old_term_doc_freq, ensure_ascii=False)
-            stats.updated_at = datetime.utcnow()
+            stats.updated_at = datetime.now(timezone.utc)
 
             session.add(stats)
 
@@ -460,7 +460,7 @@ class BM25Index:
 
             stats.term_doc_freq = json.dumps(old_term_doc_freq, ensure_ascii=False)
 
-        stats.updated_at = datetime.utcnow()
+        stats.updated_at = datetime.now(timezone.utc)
         session.add(stats)
 
 

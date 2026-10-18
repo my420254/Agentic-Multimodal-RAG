@@ -10,6 +10,7 @@ export type FileStatus =
   | 'parsed'           // 解析完成
   | 'embedding'        // 向量化中
   | 'ready'            // 已入库
+  | 'deleted'          // 已删除
   | 'failed';          // 失败
 
 /** 文件信息 */
@@ -27,6 +28,7 @@ export interface FileInfo {
   created_at?: string;
   updatedAt: string;
   errorMessage?: string;
+  error_message?: string;
 }
 
 /** 文件上传响应 */
