@@ -647,7 +647,13 @@ pgvector 是 PG 的向量类型 + 索引；PG FTS 是 tsvector/tsquery/GIN。本
 - 脚本：`backend/benchmark/interview_grounding_eval.py`；
 - 这不证明简历里的数字真实，只证明“面试问题来自这份材料”。
 
-### 6.7 测试
+### 6.7 上传→提问→引用 E2E
+
+- 脚本：`scripts/e2e_upload_ask.py`；
+- 登录 → 建临时 KB → 上传 `e2e_qcm.md` → 解析/向量化 → 提问 → SSE 引用 → 清理；
+- 结果：PASS；引用文件 `e2e_qcm.md`，score 0.718；回答含 FastAPI/Redis/PostgreSQL。
+
+### 6.8 测试
 
 - `make test-fast`：13 passed；
 - 30 条越权 + 持久化 + KB + owner 隔离：36 passed；

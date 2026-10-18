@@ -93,3 +93,15 @@ JWT_SECRET="$(python3 -c 'import secrets;print(secrets.token_urlsafe(48))')" \
 cd /home/yang/Agentic-Multimodal-RAG/backend
 python3 benchmark/interview_grounding_eval.py
 ```
+
+## 1.6 上传 → 提问 → 引用全链路 E2E（2026-10-19）
+
+- 脚本：`scripts/e2e_upload_ask.py`；
+- 链路：登录 → 创建临时 KB → 上传 `e2e_qcm.md` → 解析/向量化 → 提问“量子咖啡机 QCM 项目的技术栈是什么？” → 读取 SSE 引用 → 永久删除临时 KB；
+- 结果：**PASS**；
+  - 文件：`e2e_qcm.md`，1 chunk；
+  - 引用：`e2e_qcm.md`，score 0.718；
+  - 回答包含 `FastAPI`、`Redis`、`PostgreSQL`；
+  - 临时 KB 已清理。
+
+> 这个用例只验证链路，不验证真实简历内容；真实简历 grounding 见 1.5 的 10 条用例。
