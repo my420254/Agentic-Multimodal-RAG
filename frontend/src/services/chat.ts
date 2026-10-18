@@ -3,6 +3,7 @@
  */
 
 import request from './request';
+import { authFetch } from './auth';
 import type {
   RewriteRequest,
   RewriteResponse,
@@ -38,7 +39,7 @@ export const createChatStream = (
 
   console.log('Chat Request Payload:', JSON.stringify(data, null, 2));
 
-  fetch('/api/v1/chat/completions', {
+  authFetch('/api/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

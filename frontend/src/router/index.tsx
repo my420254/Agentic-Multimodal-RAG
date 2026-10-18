@@ -4,6 +4,7 @@
 
 import { createBrowserRouter, Navigate, useRouteError } from 'react-router-dom';
 import { AppLayout } from '@/components/layout';
+import RequireAuth from '@/components/auth/RequireAuth';
 import { Button, Result } from 'antd';
 
 // 懒加载页面组件
@@ -39,6 +40,7 @@ const MultiFilePreview = lazy(() => import('@/pages/KnowledgeBase/MultiFilePrevi
 const Chat = lazy(() => import('@/pages/Chat'));
 const Settings = lazy(() => import('@/pages/Settings'));
 const CareerCenter = lazy(() => import('@/pages/CareerCenter'));
+const Login = lazy(() => import('@/pages/Login'));
 
 // 加载中组件
 const PageLoading = () => (
@@ -62,8 +64,20 @@ const LazyComponent = ({ children }: { children: React.ReactNode }) => (
 
 const router = createBrowserRouter([
   {
+    path: '/login',
+    element: (
+      <LazyComponent>
+        <Login />
+      </LazyComponent>
+    ),
+  },
+  {
     path: '/',
-    element: <AppLayout />,
+    element: (
+      <RequireAuth>
+        <AppLayout />
+      </RequireAuth>
+    ),
     children: [
       {
         index: true,

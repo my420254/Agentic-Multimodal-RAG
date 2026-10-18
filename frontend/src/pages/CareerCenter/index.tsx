@@ -45,6 +45,7 @@ import {
   SaveOutlined,
   RadarChartOutlined
 } from '@ant-design/icons';
+import { authFetch } from '@/services/auth';
 
 const { TextArea } = Input;
 const { Title, Text, Paragraph } = Typography;
@@ -86,7 +87,7 @@ export const CareerCenter: React.FC = () => {
     }
     setMatchLoading(true);
     try {
-      const resp = await fetch('/api/v1/career/match', {
+      const resp = await authFetch('/api/v1/career/match', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ resume_text: resumeText, jd_text: jdText })
@@ -130,7 +131,7 @@ export const CareerCenter: React.FC = () => {
     setInterviewLoading(true);
 
     try {
-      const resp = await fetch('/api/v1/career/interview/chat', {
+      const resp = await authFetch('/api/v1/career/interview/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -169,7 +170,7 @@ export const CareerCenter: React.FC = () => {
   const fetchPrompts = async () => {
     setPromptLoading(true);
     try {
-      const resp = await fetch('/api/v1/career/prompts');
+      const resp = await authFetch('/api/v1/career/prompts');
       if (resp.ok) {
         const data = await resp.json();
         setPromptTemplates(data);
@@ -197,7 +198,7 @@ export const CareerCenter: React.FC = () => {
 
   const handleSavePrompt = async () => {
     try {
-      const resp = await fetch('/api/v1/career/prompts', {
+      const resp = await authFetch('/api/v1/career/prompts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -215,7 +216,7 @@ export const CareerCenter: React.FC = () => {
 
   const handleResetPrompt = async () => {
     try {
-      const resp = await fetch('/api/v1/career/prompts/reset', {
+      const resp = await authFetch('/api/v1/career/prompts/reset', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: selectedPromptKey })

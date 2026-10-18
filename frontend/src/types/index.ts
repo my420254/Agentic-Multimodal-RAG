@@ -8,3 +8,4 @@ export * from './file';
 export * from './chat';
 export * from './recall';
 export * from './settings';
+export * from './auth';

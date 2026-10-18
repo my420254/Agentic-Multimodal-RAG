@@ -4,15 +4,20 @@
 
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Menu } from 'antd';
+import { Button, Menu, Typography } from 'antd';
 import {
   DatabaseOutlined,
+  LogoutOutlined,
   MessageOutlined,
   SettingOutlined,
   RocketOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import styles from './Sidebar.module.css';
+import { clearAuth, useAuthStore } from '@/stores/auth';
+
+const { Text } = Typography;
 
 type MenuItem = Required<MenuProps>['items'][number];
 
@@ -42,6 +47,12 @@ const menuItems: MenuItem[] = [
 const Sidebar: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const user = useAuthStore((state) => state.user);
+
+  const handleLogout = () => {
+    clearAuth();
+    navigate('/login', { replace: true });
+  };
 
   // 根据当前路径获取选中的菜单项
   const getSelectedKey = () => {
@@ -76,7 +87,15 @@ const Sidebar: React.FC = () => {
       />
 
       <div className={styles.footer}>
-        <span>v0.1.0</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, justifyContent: 'center' }}>
+          <UserOutlined />
+          <Text strong>{user?.student_id || '已登录'}</Text>
+          {user?.role && <Text type="secondary">{user.role}</Text>}
+        </div>
+        <Button size="small" icon={<LogoutOutlined />} onClick={handleLogout} block>
+          退出登录
+        </Button>
+        <div style={{ marginTop: 8 }}>v0.1.0</div>
       </div>
     </aside>
   );
