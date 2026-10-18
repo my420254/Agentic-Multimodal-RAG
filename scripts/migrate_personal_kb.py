@@ -34,6 +34,7 @@ from app.models import (  # noqa: E402
     FileDocument,
     FileStatus,
     KnowledgeBase,
+    User,
 )
 from app.services.bm25 import BM25Index  # noqa: E402
 
@@ -135,11 +136,14 @@ def main() -> int:
 
         created_at = _dt(kb_row["created_at"]) or datetime.now(timezone.utc)
         updated_at = _dt(kb_row["updated_at"]) or created_at
+        owner = session.exec(select(User).where(User.student_id == "2023001")).first()
+        owner_id = str(owner.id) if owner else None
 
         kb = KnowledgeBase(
             id=KB_ID,
             name=KB_NAME,
             description="用户提供的 4 份真实材料：PDF/DOCX 简历、实习项目笔记、HiPro-LoRA 论文笔记。",
+            owner_id=owner_id,
             # 原库使用 SiliconFlow BGE-M3；系统 embedding 也是同一模型，避免把 API Key 复制进 PG。
             embedding_model="sys_embedding",
             vlm_model="default",

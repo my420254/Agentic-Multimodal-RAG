@@ -10,6 +10,7 @@ import json
 
 from app.core.database import get_session
 from app.core.deps import get_current_user
+from app.core.access import get_visible_kb
 from app.models import KnowledgeBase, User
 from app.schemas import (
     RewriteRequest,
@@ -48,14 +49,9 @@ async def chat_completions(
     current_user: User = Depends(get_current_user),
 ):
     """对话接口 (SSE 流式响应)"""
-    # 验证知识库存在
+    # 验证知识库存在且当前用户可见（公共或本人）
     for kb_id in data.kb_ids:
-        kb = session.get(KnowledgeBase, kb_id)
-        if not kb:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"code": 40401, "message": f"知识库不存在: {kb_id}"},
-            )
+        get_visible_kb(session, kb_id, current_user)
 
     # 身份只来自 token。body/query 里的任何 user_id 都不参与判定。
     uid = str(current_user.id)

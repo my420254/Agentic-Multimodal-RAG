@@ -40,6 +40,7 @@ from app.models import (  # noqa: E402
     FileStatus,
     IndexStats,
     KnowledgeBase,
+    User,
     generate_uuid,
 )
 from app.services.bm25 import BM25Index  # noqa: E402
@@ -182,10 +183,12 @@ async def main() -> int:
     file_rows: List[FileDocument] = []
 
     with Session(engine) as session:
+        owner = session.exec(select(User).where(User.student_id == "2023001")).first()
         kb = KnowledgeBase(
             id=KB_ID,
             name=KB_NAME,
             description="用户提供的真实简历：4 份 PDF + 9 张 JPG（含图片 OCR），用于求职诊断与 RAG。",
+            owner_id=str(owner.id) if owner else None,
             embedding_model="sys_embedding",
             vlm_model=settings.VLM_MODEL,
             chunk_count=0,

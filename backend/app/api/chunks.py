@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 
 from app.core.database import get_session
 from app.core.deps import get_current_user
-from app.models import FileDocument, DocumentChunk, FileStatus
+from app.core.access import get_visible_chunk, get_visible_file
+from app.models import FileDocument, DocumentChunk, FileStatus, User
 from app.schemas import ChunkResponse, ChunkUpdate, VectorizeResponse, ApiResponse
 
 router = APIRouter(tags=["Chunk"], dependencies=[Depends(get_current_user)])
@@ -19,9 +20,10 @@ router = APIRouter(tags=["Chunk"], dependencies=[Depends(get_current_user)])
 async def get_file_chunks(
     file_id: str,
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """获取文件的切分预览数据"""
-    file_doc = session.get(FileDocument, file_id)
+    file_doc = get_visible_file(session, file_id, current_user)
     if not file_doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -54,9 +56,10 @@ async def update_chunk(
     chunk_id: str,
     data: ChunkUpdate,
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """更新 Chunk 内容"""
-    chunk = session.get(DocumentChunk, chunk_id)
+    chunk = get_visible_chunk(session, chunk_id, current_user)
     if not chunk:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -104,9 +107,10 @@ async def update_chunk(
 async def vectorize_file(
     file_id: str,
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """确认并入库（触发向量化）"""
-    file_doc = session.get(FileDocument, file_id)
+    file_doc = get_visible_file(session, file_id, current_user)
     if not file_doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

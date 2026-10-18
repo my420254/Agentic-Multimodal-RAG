@@ -12,8 +12,9 @@ from datetime import datetime
 
 from app.core.database import get_session
 from app.core.deps import get_current_user
+from app.core.access import get_visible_chunk, get_visible_file, get_visible_kb
 from app.core.config import get_settings
-from app.models import KnowledgeBase, FileDocument, FileStatus, generate_uuid, DocumentChunk
+from app.models import KnowledgeBase, FileDocument, FileStatus, generate_uuid, DocumentChunk, User
 from app.schemas import FileUploadResponse, FileStatusResponse, ApiResponse
 from app.tasks.parse_tasks import process_file_parsing
 
@@ -36,10 +37,11 @@ async def upload_file(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """上传文件"""
     # 检查知识库是否存在
-    kb = session.get(KnowledgeBase, kb_id)
+    kb = get_visible_kb(session, kb_id, current_user)
     if not kb:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -102,10 +104,11 @@ async def upload_file(
 async def list_files(
     kb_id: str,
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """获取文件列表及状态"""
     # 检查知识库是否存在
-    kb = session.get(KnowledgeBase, kb_id)
+    kb = get_visible_kb(session, kb_id, current_user)
     if not kb:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -150,9 +153,10 @@ async def list_files(
 async def get_file_detail(
     file_id: str,
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """获取文件详情"""
-    file_doc = session.get(FileDocument, file_id)
+    file_doc = get_visible_file(session, file_id, current_user)
     if not file_doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -183,11 +187,12 @@ async def parse_file_manually(
     file_id: str,
     background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
     # 使用 Body() 正确解析请求体参数
     config: Optional[dict] = Body(default=None),
 ):
     """手动触发文件解析"""
-    file_doc = session.get(FileDocument, file_id)
+    file_doc = get_visible_file(session, file_id, current_user)
     if not file_doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -236,9 +241,10 @@ async def submit_file_chunks(
     data: dict, # { "chunks": [...] }
     background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """提交确认的分块结果，触发入库"""
-    file_doc = session.get(FileDocument, file_id)
+    file_doc = get_visible_file(session, file_id, current_user)
     if not file_doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -265,9 +271,10 @@ async def vectorize_file_manually(
     file_id: str,
     background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """手动触发向量化入库 (用于正常模式确认)"""
-    file_doc = session.get(FileDocument, file_id)
+    file_doc = get_visible_file(session, file_id, current_user)
     if not file_doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -307,11 +314,12 @@ async def vectorize_file_manually(
 async def get_file_chunks(
     file_id: str,
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """获取文件的 Chunks"""
     from app.models import DocumentChunk
     
-    file_doc = session.get(FileDocument, file_id)
+    file_doc = get_visible_file(session, file_id, current_user)
     if not file_doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -332,11 +340,12 @@ async def update_chunk(
     chunk_id: str,
     data: dict, # { "content": "..." }
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """更新 Chunk 内容"""
     from app.models import DocumentChunk
     
-    chunk = session.get(DocumentChunk, chunk_id)
+    chunk = get_visible_chunk(session, chunk_id, current_user)
     if not chunk:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -357,9 +366,10 @@ async def update_chunk(
 async def delete_file(
     file_id: str,
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """删除文件"""
-    file_doc = session.get(FileDocument, file_id)
+    file_doc = get_visible_file(session, file_id, current_user)
     if not file_doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

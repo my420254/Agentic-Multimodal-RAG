@@ -13,7 +13,9 @@ from typing import List, Optional
 
 from app.core.database import get_session
 from app.core.deps import get_current_user
-from app.models import KnowledgeBase, CustomModel, RetrievalLog
+from app.core.access import get_visible_kb, kb_visibility_filter
+from app.models import KnowledgeBase, CustomModel, RetrievalLog, User
+from sqlalchemy import or_
 from app.schemas import (
     RecallRequest, RecallResult, ApiResponse, RecallTestResponse,
     RetrievalLogResponse, RetrievalLogListResponse
@@ -34,6 +36,7 @@ async def recall_test(
     kb_id: str,
     data: RecallRequest,
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """
     执行召回测试
@@ -50,13 +53,8 @@ async def recall_test(
     """
     start_time = time.time()
 
-    # 检查知识库是否存在
-    kb = session.get(KnowledgeBase, kb_id)
-    if not kb:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": 40401, "message": "知识库不存在"},
-        )
+    # 检查知识库存在且当前用户可见
+    kb = get_visible_kb(session, kb_id, current_user)
 
     try:
         # 1. 使用统一检索服务执行检索
@@ -183,20 +181,16 @@ async def recall_test_multi(
     data: RecallRequest,
     kb_ids: List[str],
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """
     多知识库联合召回测试
     """
     start_time = time.time()
 
-    # 验证知识库存在
+    # 验证知识库存在且当前用户可见
     for kb_id in kb_ids:
-        kb = session.get(KnowledgeBase, kb_id)
-        if not kb:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"code": 40401, "message": f"知识库 {kb_id} 不存在"},
-            )
+        get_visible_kb(session, kb_id, current_user)
 
     try:
         # 使用统一检索服务
@@ -292,19 +286,35 @@ async def get_retrieval_logs(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """
     获取检索历史记录列表
     """
     try:
-        # 构建查询
+        visible_ids = [
+            kb.id
+            for kb in session.exec(
+                select(KnowledgeBase).where(kb_visibility_filter(current_user))
+            ).all()
+        ]
+        if kb_id and kb_id not in visible_ids:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": 40402, "message": "知识库不存在"},
+            )
+
+        # 构建查询：只返回当前用户可见知识库产生的日志
         query = select(RetrievalLog)
         count_query = select(func.count(RetrievalLog.id))
-
         if kb_id:
-            # 支持模糊匹配（因为 kb_id 可能是逗号分隔的多个 ID）
-            query = query.where(RetrievalLog.kb_id.contains(kb_id))
-            count_query = count_query.where(RetrievalLog.kb_id.contains(kb_id))
+            kb_filter = RetrievalLog.kb_id.contains(kb_id)
+        elif visible_ids:
+            kb_filter = or_(*[RetrievalLog.kb_id.contains(kid) for kid in visible_ids])
+        else:
+            kb_filter = False
+        query = query.where(kb_filter)
+        count_query = count_query.where(kb_filter)
 
         # 获取总数
         total = session.exec(count_query).one()
@@ -327,6 +337,8 @@ async def get_retrieval_logs(
             page_size=page_size
         ))
 
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -343,12 +355,19 @@ async def get_retrieval_logs(
 async def get_retrieval_log_detail(
     log_id: str,
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """
     获取单条检索历史记录详情
     """
     log = session.get(RetrievalLog, log_id)
-    if not log:
+    visible_ids = [
+        kb.id
+        for kb in session.exec(
+            select(KnowledgeBase).where(kb_visibility_filter(current_user))
+        ).all()
+    ]
+    if not log or not any(kid in visible_ids for kid in (log.kb_id or "").split(",")):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": 40402, "message": "历史记录不存在"},
@@ -364,12 +383,19 @@ async def get_retrieval_log_detail(
 async def delete_retrieval_log(
     log_id: str,
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """
     删除单条检索历史记录
     """
     log = session.get(RetrievalLog, log_id)
-    if not log:
+    visible_ids = [
+        kb.id
+        for kb in session.exec(
+            select(KnowledgeBase).where(kb_visibility_filter(current_user))
+        ).all()
+    ]
+    if not log or not any(kid in visible_ids for kid in (log.kb_id or "").split(",")):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": 40402, "message": "历史记录不存在"},
@@ -388,23 +414,38 @@ async def delete_retrieval_log(
 async def clear_retrieval_logs(
     kb_id: Optional[str] = Query(None, description="知识库 ID（可选，不传则清空所有）"),
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """
     清空检索历史记录
     """
     try:
+        visible_ids = [
+            kb.id
+            for kb in session.exec(
+                select(KnowledgeBase).where(kb_visibility_filter(current_user))
+            ).all()
+        ]
         if kb_id:
-            # 删除指定知识库的记录
-            statement = delete(RetrievalLog).where(RetrievalLog.kb_id.contains(kb_id))
+            if kb_id not in visible_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"code": 40402, "message": "知识库不存在"},
+                )
+            log_filter = RetrievalLog.kb_id.contains(kb_id)
+        elif visible_ids:
+            log_filter = or_(*[RetrievalLog.kb_id.contains(kid) for kid in visible_ids])
         else:
-            # 删除所有记录
-            statement = delete(RetrievalLog)
+            log_filter = False
+        statement = delete(RetrievalLog).where(log_filter)
 
         session.exec(statement)
         session.commit()
 
         return ApiResponse(message="清空成功")
 
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()

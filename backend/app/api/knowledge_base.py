@@ -10,7 +10,8 @@ import os
 
 from app.core.database import get_session
 from app.core.deps import get_current_user
-from app.models import KnowledgeBase, FileDocument
+from app.core.access import get_visible_kb, kb_visibility_filter
+from app.models import KnowledgeBase, FileDocument, User
 from app.schemas import (
     KnowledgeBaseCreate,
     KnowledgeBaseResponse,
@@ -27,17 +28,31 @@ router = APIRouter(
 
 
 @router.get("", response_model=ApiResponse[List[KnowledgeBaseResponse]])
-async def list_knowledge_bases(session: Session = Depends(get_session)):
-    """获取知识库列表"""
-    statement = select(KnowledgeBase).where(KnowledgeBase.is_deleted == False).order_by(KnowledgeBase.updated_at.desc())
+async def list_knowledge_bases(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """获取当前用户可见的知识库列表（公共 + 本人）。"""
+    statement = (
+        select(KnowledgeBase)
+        .where(KnowledgeBase.is_deleted == False, kb_visibility_filter(current_user))
+        .order_by(KnowledgeBase.updated_at.desc())
+    )
     kbs = session.exec(statement).all()
     return ApiResponse(data=kbs)
 
 
 @router.get("/recycle-bin", response_model=ApiResponse[List[KnowledgeBaseResponse]])
-async def list_deleted_knowledge_bases(session: Session = Depends(get_session)):
-    """获取回收站知识库列表"""
-    statement = select(KnowledgeBase).where(KnowledgeBase.is_deleted == True).order_by(KnowledgeBase.updated_at.desc())
+async def list_deleted_knowledge_bases(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """获取回收站知识库列表（公共 + 本人）。"""
+    statement = (
+        select(KnowledgeBase)
+        .where(KnowledgeBase.is_deleted == True, kb_visibility_filter(current_user))
+        .order_by(KnowledgeBase.updated_at.desc())
+    )
     kbs = session.exec(statement).all()
     return ApiResponse(data=kbs)
 
@@ -46,6 +61,7 @@ async def list_deleted_knowledge_bases(session: Session = Depends(get_session)):
 async def create_knowledge_base(
     data: KnowledgeBaseCreate,
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """创建知识库"""
     # 检查名称是否重复
@@ -62,6 +78,7 @@ async def create_knowledge_base(
     kb = KnowledgeBase(
         name=data.name,
         description=data.description,
+        owner_id=str(current_user.id),
         embedding_model=data.embedding_model,
         vlm_model=data.vlm_model,
     )
@@ -89,14 +106,10 @@ async def create_knowledge_base(
 async def get_knowledge_base(
     kb_id: str,
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
-    """获取知识库详情"""
-    kb = session.get(KnowledgeBase, kb_id)
-    if not kb:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": 40401, "message": "知识库不存在"},
-        )
+    """获取知识库详情（仅公共或本人）。"""
+    kb = get_visible_kb(session, kb_id, current_user)
 
     # 获取文件数量
     files_count = len(
@@ -137,14 +150,12 @@ async def get_knowledge_base(
 async def delete_knowledge_base(
     kb_id: str,
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
-    """删除知识库（移入回收站）"""
-    kb = session.get(KnowledgeBase, kb_id)
-    if not kb:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": 40401, "message": "知识库不存在"},
-        )
+    """删除知识库（移入回收站，仅本人）。"""
+    kb = get_visible_kb(session, kb_id, current_user)
+    if kb.owner_id is None:
+        raise HTTPException(status_code=403, detail={"code": 40301, "message": "公共知识库不可删除"})
 
     kb.is_deleted = True
     session.add(kb)
@@ -157,14 +168,12 @@ async def delete_knowledge_base(
 async def restore_knowledge_base(
     kb_id: str,
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
-    """从回收站恢复知识库"""
-    kb = session.get(KnowledgeBase, kb_id)
-    if not kb:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": 40401, "message": "知识库不存在"},
-        )
+    """从回收站恢复知识库（仅本人）。"""
+    kb = get_visible_kb(session, kb_id, current_user)
+    if kb.owner_id is None:
+        raise HTTPException(status_code=403, detail={"code": 40301, "message": "公共知识库不可恢复"})
 
     kb.is_deleted = False
     session.add(kb)
@@ -177,14 +186,12 @@ async def restore_knowledge_base(
 async def permanent_delete_knowledge_base(
     kb_id: str,
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
-    """永久删除知识库"""
-    kb = session.get(KnowledgeBase, kb_id)
-    if not kb:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": 40401, "message": "知识库不存在"},
-        )
+    """永久删除知识库（仅本人）。"""
+    kb = get_visible_kb(session, kb_id, current_user)
+    if kb.owner_id is None:
+        raise HTTPException(status_code=403, detail={"code": 40301, "message": "公共知识库不可永久删除"})
 
     # 删除向量库
     try:

@@ -48,6 +48,7 @@ class KnowledgeBaseResponse(BaseModel):
     id: str
     name: str
     description: Optional[str]
+    owner_id: Optional[str] = None
     embedding_model: str
     vlm_model: str
     chunk_count: int

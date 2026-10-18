@@ -46,6 +46,8 @@ class KnowledgeBase(SQLModel, table=True):
     id: str = Field(default_factory=generate_uuid, primary_key=True)
     name: str = Field(index=True) # 允许重名
     description: Optional[str] = None
+    # NULL = 系统/公共知识库；非 NULL = 仅该 owner 可见
+    owner_id: Optional[str] = Field(default=None, index=True, max_length=64)
     embedding_model: str
     vlm_model: str
     chunk_count: int = Field(default=0)
