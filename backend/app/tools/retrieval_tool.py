@@ -51,14 +51,11 @@ async def search_knowledge_base(
     
     with Session(engine) as session:
         # 1. Resolve Knowledge Bases
-        target_kb_ids = kb_ids
-        if not target_kb_ids:
-            all_kbs = session.exec(select(KnowledgeBase).where(KnowledgeBase.is_deleted == False)).all()
-            target_kb_ids = [kb.id for kb in all_kbs]
-            
+        # 安全：未显式传入 kb_ids 时不再全库搜索；调用方必须注入当前用户可见 KB。
+        target_kb_ids = kb_ids or []
         if not target_kb_ids:
             return json.dumps({
-                "context": "No knowledge bases found in the system.",
+                "context": "No visible knowledge bases were provided for this request.",
                 "citations": []
             }, ensure_ascii=False)
             

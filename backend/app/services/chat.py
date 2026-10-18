@@ -534,11 +534,16 @@ class ChatService:
             elif msg.role.value == "assistant":
                 langchain_messages.append(AIMessage(content=msg.content))
         
-        # 确保 kb_ids 不为空 (兜底)
+        # 未指定 KB 时，只回退到当前用户可见的 KB；绝不回退到全库。
         if not kb_ids:
+            from app.models import User
+            from app.core.access import visible_kb_ids_for_user
             with Session(engine) as session:
-                all_kbs = session.exec(select(KnowledgeBase).where(KnowledgeBase.is_deleted == False)).all()
-                kb_ids = [kb.id for kb in all_kbs]
+                user = session.get(User, user_id)
+                kb_ids = visible_kb_ids_for_user(session, user) if user else []
+            if not kb_ids:
+                yield ("error", {"error": "当前账号没有可见的知识库，请先在知识库中选择/创建"})
+                return
 
         # 1.5 获取模型配置
         model_config = {}

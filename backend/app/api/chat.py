@@ -10,7 +10,7 @@ import json
 
 from app.core.database import get_session
 from app.core.deps import get_current_user
-from app.core.access import get_visible_kb
+from app.core.access import get_visible_kb, visible_kb_ids_for_user
 from app.models import KnowledgeBase, User
 from app.schemas import (
     RewriteRequest,
@@ -53,6 +53,9 @@ async def chat_completions(
     for kb_id in data.kb_ids:
         get_visible_kb(session, kb_id, current_user)
 
+    # 未指定知识库时，只允许搜索当前用户可见的 KB；绝不回退到全库。
+    effective_kb_ids = list(data.kb_ids) or visible_kb_ids_for_user(session, current_user)
+
     # 身份只来自 token。body/query 里的任何 user_id 都不参与判定。
     uid = str(current_user.id)
 
@@ -70,7 +73,7 @@ async def chat_completions(
         try:
             async for event_type, event_data in chat_service.chat_stream(
                 messages=data.messages,
-                kb_ids=data.kb_ids,
+                kb_ids=effective_kb_ids,
                 use_rewrite=data.use_rewrite,
                 mode=data.mode,
                 top_k=data.top_k,

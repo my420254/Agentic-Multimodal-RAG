@@ -9,7 +9,7 @@
 
 from fastapi import HTTPException, status
 from sqlalchemy import or_
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.models import DocumentChunk, FileDocument, KnowledgeBase, User
 
@@ -27,6 +27,16 @@ def _not_found(what: str) -> HTTPException:
         status_code=status.HTTP_404_NOT_FOUND,
         detail={"code": 40401, "message": f"{what}不存在"},
     )
+
+
+def visible_kb_ids_for_user(session: Session, user: User) -> list[str]:
+    """当前用户可见的 KB ID 列表（公共 + 本人）。"""
+    return [
+        kb.id
+        for kb in session.exec(
+            select(KnowledgeBase).where(kb_visibility_filter(user))
+        ).all()
+    ]
 
 
 def get_visible_kb(
