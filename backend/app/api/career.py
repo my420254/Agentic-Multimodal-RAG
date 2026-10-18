@@ -16,7 +16,10 @@ from app.services.prompt_service import prompt_workshop_service
 from app.services.parser import FileParser
 from app.core.rate_limiter import global_rate_limiter
 from app.core.deps import get_current_user
-from app.models import User
+from app.core.access import get_visible_file, get_visible_kb, visible_kb_ids_for_user
+from app.core.database import get_session
+from app.models import KnowledgeBase, User
+from sqlmodel import Session, select
 
 router = APIRouter(
     prefix="/career",
@@ -55,6 +58,8 @@ class InterviewChatRequest(BaseModel):
     target_role: str = Field(default="AI Agent / 后端研发工程师", description="目标应聘岗位")
     resume_summary: str = Field(default="", description="学生简历亮点摘要")
     custom_prompt: Optional[str] = Field(default=None, description="用户自定义生效的系统提示词")
+    kb_ids: List[str] = Field(default_factory=list, description="用于检索出题的简历知识库；为空时后端自动选择当前用户可见的简历库")
+    resume_file_id: Optional[str] = Field(default=None, description="锁定某一份简历文件出题；为空时按 KB 检索")
 
 
 class UpdatePromptRequest(BaseModel):
@@ -126,6 +131,7 @@ async def parse_resume_text(req: ResumeParseRequest):
 async def interview_chat(
     req: InterviewChatRequest,
     current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
 ):
     """
     【智能模拟面试】
@@ -140,6 +146,23 @@ async def interview_chat(
         raise HTTPException(status_code=400, detail="对话消息列表不能为空")
     if req.mode != "mock_interview":
         raise HTTPException(status_code=400, detail="仅支持模拟面试模式；心理疏导请使用智能对话")
+
+    # 0. 解析出题用的简历：优先锁定单份简历，否则按可见简历库
+    if req.resume_file_id:
+        file_doc = get_visible_file(session, req.resume_file_id, current_user)
+        grounding_kb_ids = [file_doc.kb_id]
+    elif req.kb_ids:
+        for kb_id in req.kb_ids:
+            get_visible_kb(session, kb_id, current_user)
+        grounding_kb_ids = list(req.kb_ids)
+    else:
+        visible_ids = visible_kb_ids_for_user(session, current_user)
+        visible_kbs = session.exec(
+            select(KnowledgeBase).where(KnowledgeBase.id.in_(visible_ids))
+        ).all() if visible_ids else []
+        resume_kbs = [kb for kb in visible_kbs if "简历" in (kb.name or "") or kb.id == "kb_real_resumes"]
+        preferred = [kb for kb in resume_kbs if kb.id == "kb_real_resumes"]
+        grounding_kb_ids = [kb.id for kb in (preferred or resume_kbs)]
 
     # 1. 挂接三层分层记忆服务 (MemoryService)
     #    session_id 归属必须来自 token：他人会话与不存在会话统一 404，不泄露存在性。
@@ -169,6 +192,8 @@ async def interview_chat(
         resume_summary=augmented_summary,
         custom_prompt=req.custom_prompt,
         user_id=uid,
+        kb_ids=grounding_kb_ids,
+        resume_file_id=req.resume_file_id,
     )
 
     # 2. 记忆落库（同上，永远写当前 token 用户的空间）

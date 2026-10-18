@@ -109,8 +109,9 @@ class VectorStoreService:
         query_vector: List[float],
         top_k: int = 5,
         score_threshold: float = 0.0,
+        file_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """PostgreSQL pgvector 余弦检索（与 Chroma 并存，默认走这里）。"""
+        """PostgreSQL pgvector 余弦检索；可按 file_id 锁定一份简历。"""
         from sqlalchemy import select
         from app.models import DocumentChunk, FileDocument
 
@@ -121,6 +122,7 @@ class VectorStoreService:
             .where(
                 FileDocument.kb_id == kb_id,
                 DocumentChunk.embedding.isnot(None),
+                *([DocumentChunk.file_id == file_id] if file_id else []),
             )
             .order_by(distance)
             .limit(top_k)

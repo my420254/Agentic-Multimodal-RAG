@@ -369,8 +369,8 @@ RRF：`score = Σ 1/(k + rank_i)`，只看排名，不看原始分数，避免�
 解决“只召回该看的、该类型的”：租户/owner、文档类型、时间、敏感级、语言、版本。
 
 本项目：
-- KB 级 owner 过滤：`owner_id IS NULL OR owner_id = current_user`；
-- API/工具层校验 KB 可见性，文件/chunk 继承 KB 权限；
+- **接口/工具层**校验 KB 可见性（`owner_id IS NULL OR owner_id = current_user`），文件/chunk 继承 KB 权限；
+- `query_pgvector` 的 SQL 目前只按 `kb_id`/`file_id` 过滤；**没有**在 SQL 里再 JOIN `knowledge_bases` 做 owner 条件。所以话术是“API 层隔离”，不要说“数据库强制隔离”；
 - Agent 工具不允许模型覆盖 `kb_ids`，只能由后端注入可见 ID；
 - **没有**文档类型/敏感级的检索期 metadata filter，这是可补的点。
 
@@ -630,13 +630,23 @@ pgvector 是 PG 的向量类型 + 索引；PG FTS 是 tsvector/tsquery/GIN。本
 - 同一批 39 条 golden 指标不变：vector all@3 92.31%，hybrid 89.74%；
 - 平均检索延迟：vector 632.1ms、fulltext 151.9ms、hybrid 814.2ms（pgvector 实测，非受控对比）。
 
-### 6.5 测试
+### 6.5 模拟面试的检索闭环（本轮新增）
+
+- 前端模拟面试页可锁定一份简历（`resume_file_id`），后端按 `file_id` 过滤 pgvector；
+- 每轮先检索 top4 简历 chunk，再注入 `mock_interviewer` 提示词；
+- 响应新增：
+  - `grounding_available: bool`
+  - `grounding_citations: [{chunk_id,file_name,location,score,content}]`
+- 前端不再显示 1–10 分，只显示“基于简历材料”和引用片段；
+- 实测：2023001 选张梦洋 PDF，4 条 citations 全部来自该 PDF；2023002 传同一 `resume_file_id` 返回 404。
+
+### 6.6 测试
 
 - `make test-fast`：13 passed；
 - 30 条越权 + 持久化 + KB + owner 隔离：36 passed；
-- 全量 `python3 -m pytest tests -q`：**78 passed in 41.02s**（GraphRAG 测试删掉后实跑）；
+- 全量 `python3 -m pytest tests -q`：**79 passed in 43.78s**（GraphRAG 测试删除 + 缓存测试新增后实跑）；
 - 前端 build：通过；
-- **但 78/78 不等于 78 条都在测它名字声称的能力**：
+- **但 79/79 不等于 79 条都在测它名字声称的能力**：
   - 原 `test_sliding_window_rate_limiter_1000_qps` 已改名为 `test_sliding_window_rate_limiter_limit`，且注释“不是压测”；
   - `test_pgvector_extension_active` 现在检查扩展 + vector 列 + HNSW 索引，但**不检查召回质量**；
   - `test_lora_service.py` 测登记表，不是训练好的 LoRA。
@@ -797,7 +807,7 @@ Skill 的核心是**能力包 + 渐进式加载**：名称/描述先给模型，
 | “8 份 benchmark 样本” | `data/benchmark_resumes` 只有 4 份对抗样本；4 份真实简历在 `data/真实简历` |
 | “L2 摘要存 interview_messages” | 摘要存 `interview_sessions.summary`；`interview_messages` 存逐条消息 |
 | “Go/Kafka 生产能力” | 没有 Go 源码；只有 `docs/archive/PRD_Campus_Career_Agent_Gin_Kafka.md` 设计稿 |
-| “80/80 证明这些能力都做了” | 当前是 78/78（GraphRAG 测试删除后），且测试名与内容有偏差（见 6.4） |
+| “80/80 证明这些能力都做了” | 当前是 79/79（GraphRAG 测试删除 + 缓存测试新增），且测试名与内容有偏差（见 6.4） |
 
 ### 11.3 比 RRF/MCP/Skills 更优先的 P0：先把叙事和代码对齐
 

@@ -154,10 +154,18 @@ export const CareerCenter: React.FC<CareerCenterProps> = ({ tab }) => {
     content: string;
     feedback?: string;
     score?: number;
+    groundingAvailable?: boolean;
+    groundingCitations?: Array<{
+      chunk_id: string;
+      file_name: string;
+      location?: string;
+      score?: number;
+      content: string;
+    }>;
   }>>([
     {
       role: 'interviewer',
-      content: '同学你好！我是辽宁大学重点实验室技术面试官。我看你简历里写到使用 Redis + Lua 脚本实现了滑动窗口限流器并支撑 1000+ QPS。请你结合底层机制谈谈：为什么选择 ZSet 滑动窗口而不是固定窗口计数器？在高并发多实例环境下，Lua 脚本是如何保证原子性以防超买的？'
+      content: '同学你好！我是技术面试官。请先从简历里挑一段你最想被追问的项目经历，讲清背景、你负责的部分和结果；我会只基于你选定的这份简历材料继续追问。'
     }
   ]);
   const [userInput, setUserInput] = useState('');
@@ -178,7 +186,8 @@ export const CareerCenter: React.FC<CareerCenterProps> = ({ tab }) => {
           messages: newMsgs.map(m => ({ role: m.role, content: m.content })),
           mode: 'mock_interview',
           target_role: 'AI Agent / 高并发架构工程师',
-          resume_summary: '辽宁大学硕士，熟练掌握 Agent 状态机、Hybrid RAG、FastAPI 高并发与 Redis 限流'
+          resume_summary: '辽宁大学硕士，熟练掌握 Agent 状态机、Hybrid RAG、FastAPI 高并发与 Redis 限流',
+          resume_file_id: selectedResumeId || undefined
         })
       });
       if (!resp.ok) throw new Error('面试辅导服务响应失败');
@@ -189,7 +198,9 @@ export const CareerCenter: React.FC<CareerCenterProps> = ({ tab }) => {
           role: data.role,
           content: data.reply_text,
           feedback: data.feedback,
-          score: data.score_for_last_answer
+          score: data.score_for_last_answer,
+          groundingAvailable: data.grounding_available,
+          groundingCitations: data.grounding_citations
         }
       ]);
     } catch (err: any) {
@@ -502,8 +513,20 @@ export const CareerCenter: React.FC<CareerCenterProps> = ({ tab }) => {
             label: <span>模拟面试</span>,
             children: (
               <div>
-                <div style={{ marginBottom: 16 }}>
-                  <Tag color="cyan">大厂技术面试官 · 逐轮打分与递进追问</Tag>
+                <div style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <Tag color="cyan">大厂技术面试官 · 基于所选简历材料出题</Tag>
+                  <Space>
+                    <Text type="secondary">出题材料：</Text>
+                    <Select
+                      value={selectedResumeId || undefined}
+                      onChange={(value) => setSelectedResumeId(value)}
+                      options={resumeFiles.map((f) => ({ value: f.id, label: `${f.name}（${f.chunks} chunks）` }))}
+                      placeholder="选择一份简历"
+                      style={{ width: 340 }}
+                      showSearch
+                      optionFilterProp="label"
+                    />
+                  </Space>
                 </div>
 
                 <Card
@@ -531,11 +554,26 @@ export const CareerCenter: React.FC<CareerCenterProps> = ({ tab }) => {
                       >
                         <div style={{ fontWeight: 'bold', marginBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <span>{msg.role === 'user' ? '候选人 (同学)' : '大厂技术面试官'}</span>
-                          {msg.score && <Tag color="green">{msg.score} 分</Tag>}
+                          {msg.role !== 'user' && msg.groundingAvailable && <Tag color="green">基于简历材料</Tag>}
                         </div>
                         <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
 
                       </div>
+
+                      {msg.groundingCitations && msg.groundingCitations.length > 0 && (
+                        <div style={{ maxWidth: '80%', marginTop: 6, padding: '8px 12px', border: '1px solid #d9f7be', borderRadius: 6, backgroundColor: '#f6ffed' }}>
+                          <Text type="secondary" style={{ fontSize: 12 }}>引用简历材料：</Text>
+                          {msg.groundingCitations.map((c, idx) => (
+                            <div key={c.chunk_id || idx} style={{ marginTop: 4 }}>
+                              <Tag color="green">{c.file_name}</Tag>
+                              {c.location && <Text type="secondary" style={{ fontSize: 12 }}>{c.location}</Text>}
+                              <div style={{ fontSize: 12, color: '#595959', marginTop: 2 }}>
+                                {String(c.content || '').slice(0, 220)}...
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
 
                       {msg.feedback && (
                         <div style={{ maxWidth: '80%', marginTop: 6 }}>

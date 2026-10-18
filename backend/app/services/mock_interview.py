@@ -13,8 +13,15 @@ import logging
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 
+from sqlmodel import Session
+
+from app.core.database import engine
+from app.models import FileDocument
+from app.services.embedding import EmbeddingService
 from app.services.llm import LLMService
 from app.services.prompt_service import prompt_workshop_service
+from app.services.retrieval import RetrievalService
+from app.services.vector_store import VectorStoreService
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +66,8 @@ class InterviewTurnResponse(BaseModel):
     feedback: Optional[str] = Field(default=None, description="针对学生上一轮回答的优点与不足分析")
     identified_gaps: List[str] = Field(default_factory=list, description="本次追问识别出的技术薄弱点与盲区")
     identified_strengths: List[str] = Field(default_factory=list, description="本次追问识别出的技术亮点与深度体现")
+    grounding_citations: List[Dict[str, Any]] = Field(default_factory=list, description="本轮出题实际引用的简历材料 chunk")
+    grounding_available: bool = Field(default=False, description="本轮是否检索到可用于出题的简历材料")
     recommended_reading: List[str] = Field(default_factory=list, description="技术补强推荐阅读")
 
 
@@ -97,6 +106,8 @@ class MockInterviewService:
         custom_prompt: Optional[str] = None,
         *,
         user_id: str,
+        kb_ids: Optional[List[str]] = None,
+        resume_file_id: Optional[str] = None,
     ) -> InterviewTurnResponse:
         """多轮模拟面试（提示词按 user_id 隔离）"""
         if not isinstance(user_id, str) or not user_id.strip():
@@ -106,6 +117,58 @@ class MockInterviewService:
 
         last_user_msg = messages[-1]["content"] if messages else "老师好，我准备好了。"
         user_turn_count = len([m for m in messages if m.get("role") == "user"])
+
+        # 0. 先检索简历/项目材料，再出题；resume_file_id 用于锁定一份简历
+        grounding_context = ""
+        grounding_citations: List[Dict[str, Any]] = []
+        if kb_ids:
+            try:
+                query_text = f"{target_role} {last_user_msg}"[:500]
+                results: List[Dict[str, Any]] = []
+                with Session(engine) as session:
+                    if resume_file_id:
+                        file_doc = session.get(FileDocument, resume_file_id)
+                        if file_doc and file_doc.kb_id in kb_ids:
+                            query_vector = await EmbeddingService().embed_query(query_text)
+                            results = VectorStoreService().query_pgvector(
+                                session, file_doc.kb_id, query_vector,
+                                top_k=4, file_id=resume_file_id,
+                            )
+                            for r in results:
+                                r["file_name"] = file_doc.name
+                                r["location_info"] = f"第 {r.get('metadata', {}).get('page_number') or 1} 页"
+                    if not results:
+                        results, _ = await RetrievalService().search(
+                            session,
+                            query=query_text,
+                            kb_ids=kb_ids,
+                            search_mode="hybrid",
+                            top_k=4,
+                            use_cache=False,
+                            log_retrieval=False,
+                        )
+                for idx, r in enumerate(results, 1):
+                    content = (r.get("content") or "").strip()
+                    if not content:
+                        continue
+                    citation = {
+                        "chunk_id": r.get("id"),
+                        "file_name": r.get("file_name") or "简历材料",
+                        "location": r.get("location_info") or "",
+                        "score": round(float(r.get("score") or 0), 4),
+                        "content": content[:500],
+                    }
+                    grounding_citations.append(citation)
+                    grounding_context += (
+                        f"[{idx}] {citation['file_name']} | {citation['location']}\n"
+                        f"{content[:700]}\n\n"
+                    )
+            except Exception as e:
+                logger.warning(f"[MockInterviewService] 简历检索失败，降级为无材料出题: {e}")
+
+        if not grounding_context:
+            grounding_context = "（本轮未检索到简历/项目材料；不要编造候选人经历，只问岗位通用问题。）"
+        grounding_available = bool(grounding_citations)
 
         # 1. 技术模拟面试模式 (4 阶状态机)
         current_focus = target_role or "高并发架构"
@@ -127,18 +190,27 @@ class MockInterviewService:
    - 顺着阶段阶梯纵向推进（选型设计 -> 底层核心原理 -> 生产极端容错 -> 量化复盘与压测）；
    - 在 identified_strengths 中如实记录亮点。
 3. 若会话轮次已较深入（turn >= 4）或已覆盖关键考点：
-   - 动作可设为 WRAPUP，进行本次技术考察阶段小结。"""
+   - 动作可设为 WRAPUP，进行本次技术考察阶段小结。
+4. 【材料约束】：只能基于本轮材料中出现的经历出题；材料没有的经历不要问；下一问至少引用一个材料技术点，并在 grounding_chunk_ids 中列出 chunk id。"""
 
         if custom_prompt and custom_prompt.strip():
-            system_prompt = f"{custom_prompt}\n\n【状态机自适应指导】:\n{stage_guidance}"
+            system_prompt = (
+                f"{custom_prompt}\n\n【本轮检索到的简历/项目材料】\n{grounding_context}\n"
+                f"\n【状态机自适应指导】:\n{stage_guidance}"
+            )
         else:
+            tpl = prompt_workshop_service.get_template(user_id, "mock_interviewer")
             base_prompt = prompt_workshop_service.format_prompt(
                 user_id,
                 "mock_interviewer",
                 target_role=target_role,
                 resume_summary=resume_summary or "熟练掌握 Agent 状态机、Hybrid RAG、FastAPI 高并发与 Redis 缓存治理",
-                student_answer=last_user_msg
+                student_answer=last_user_msg,
+                retrieved_context=grounding_context,
             )
+            # 自定义旧模板可能没有 {retrieved_context}，追加一次，避免材料约束丢失
+            if not tpl or "{retrieved_context}" not in tpl.system_prompt:
+                base_prompt += f"\n\n【本轮检索到的简历/项目材料】\n{grounding_context}"
             system_prompt = f"{base_prompt}\n\n【状态机自适应指导】:\n{stage_guidance}"
 
         try:
@@ -155,6 +227,11 @@ class MockInterviewService:
             match = re.search(r"\{.*\}", raw_res, re.DOTALL)
             if match:
                 data = json.loads(match.group(0))
+                cited_ids = set(data.get("grounding_chunk_ids") or [])
+                if cited_ids:
+                    selected = [c for c in grounding_citations if c.get("chunk_id") in cited_ids]
+                    if selected:
+                        grounding_citations = selected
                 # 解析 action
                 raw_action = data.get("probing_action", "DEEP_PROBE")
                 action = ProbingAction.PIVOT_FALLBACK if (is_unknown_signal or raw_action == "PIVOT_FALLBACK") else ProbingAction.DEEP_PROBE
@@ -185,6 +262,8 @@ class MockInterviewService:
                     feedback=data.get("feedback", "技术概念阐述准确，若能结合容错与度量指标将更具说服力。"),
                     identified_gaps=gaps,
                     identified_strengths=strengths,
+                    grounding_citations=grounding_citations,
+                    grounding_available=grounding_available,
                     recommended_reading=data.get("recommended_reading", ["《高性能系统架构设计》", "《分布式技术原理与实战》"])
                 )
         except Exception as e:
@@ -204,6 +283,8 @@ class MockInterviewService:
                 feedback="坦诚认知自己的技术边界是成熟工程师的良好素质；建议在复盘中重点强化该组件的高并发进阶机制。",
                 identified_gaps=[f"{current_focus} 进阶故障容错与极端场景治理"],
                 identified_strengths=[],
+                grounding_citations=grounding_citations,
+                grounding_available=grounding_available,
                 recommended_reading=["《技术核心原理深度剖析》", "《高频技术面试高分答题指南》"]
             )
         else:

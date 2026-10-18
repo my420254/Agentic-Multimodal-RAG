@@ -40,10 +40,14 @@ class RetrievalCache:
         query: str,
         kb_ids: List[str],
         search_mode: str,
-        top_k: int
+        top_k: int,
+        params: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """生成缓存 key"""
-        content = f"{query}|{sorted(kb_ids)}|{search_mode}|{top_k}"
+        """生成缓存 key；权重/阈值必须参与，否则改参后仍命中旧结果。"""
+        content = (
+            f"{query}|{sorted(kb_ids)}|{search_mode}|{top_k}|"
+            f"{json.dumps(params or {}, sort_keys=True, ensure_ascii=False)}"
+        )
         return hashlib.md5(content.encode()).hexdigest()
 
     def get(
@@ -51,13 +55,14 @@ class RetrievalCache:
         query: str,
         kb_ids: List[str],
         search_mode: str,
-        top_k: int
+        top_k: int,
+        params: Optional[Dict[str, Any]] = None,
     ) -> Optional[List[Dict[str, Any]]]:
         """获取缓存"""
         if not self.enabled:
             return None
 
-        key = self._make_key(query, kb_ids, search_mode, top_k)
+        key = self._make_key(query, kb_ids, search_mode, top_k, params)
         if key in self.cache:
             entry = self.cache[key]
             if time.time() - entry["timestamp"] < self.ttl:
@@ -72,13 +77,14 @@ class RetrievalCache:
         kb_ids: List[str],
         search_mode: str,
         top_k: int,
-        results: List[Dict[str, Any]]
+        results: List[Dict[str, Any]],
+        params: Optional[Dict[str, Any]] = None,
     ) -> None:
         """设置缓存"""
         if not self.enabled:
             return
 
-        key = self._make_key(query, kb_ids, search_mode, top_k)
+        key = self._make_key(query, kb_ids, search_mode, top_k, params)
         self.cache[key] = {
             "results": results,
             "timestamp": time.time()
@@ -253,8 +259,13 @@ class RetrievalService:
         }
 
         # 尝试从缓存获取
+        cache_params = {
+            "score_threshold": score_threshold,
+            "vector_weight": vector_weight,
+            "bm25_weight": bm25_weight,
+        }
         if use_cache:
-            cached = self.cache.get(query, kb_ids, search_mode, top_k)
+            cached = self.cache.get(query, kb_ids, search_mode, top_k, cache_params)
             if cached:
                 print(f"✅ [Retrieval] 命中缓存")
                 return cached, {"from_cache": True}
@@ -303,7 +314,7 @@ class RetrievalService:
 
         # 缓存结果
         if use_cache and results:
-            self.cache.set(query, kb_ids, search_mode, top_k, results)
+            self.cache.set(query, kb_ids, search_mode, top_k, results, cache_params)
 
         # 记录检索日志
         if log_retrieval:
