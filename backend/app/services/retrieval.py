@@ -201,6 +201,13 @@ class RetrievalService:
         print(f"⚠️ [Retrieval] KB={kb_id} 未配置embedding_model，回退系统默认: {settings.EMBEDDING_MODEL}")
         return await embedding_service.embed_query(query)
 
+    def _query_vector(self, session: Session, kb_id: str, query_vector: List[float], top_k: int, score_threshold: float):
+        """默认走 pgvector；非 PostgreSQL（如测试 SQLite）回退 Chroma。"""
+        dialect = getattr(getattr(session, "bind", None), "dialect", None)
+        if settings.VECTOR_BACKEND == "pgvector" and dialect is not None and dialect.name == "postgresql":
+            return self.vector_store.query_pgvector(session, kb_id, query_vector, top_k, score_threshold)
+        return self.vector_store.query(kb_id, query_vector, top_k, score_threshold)
+
     async def search(
         self,
         session: Session,
@@ -321,12 +328,7 @@ class RetrievalService:
         all_results = []
         for kb_id in kb_ids:
             query_vector = await self._embed_query_for_kb(session, kb_id, query)
-            results = self.vector_store.query(
-                kb_id=kb_id,
-                query_vector=query_vector,
-                top_k=top_k,
-                score_threshold=score_threshold
-            )
+            results = self._query_vector(session, kb_id, query_vector, top_k, score_threshold)
 
             # 补充知识库信息
             kb = session.get(KnowledgeBase, kb_id)
@@ -430,12 +432,7 @@ class RetrievalService:
         try:
             for kb_id in kb_ids:
                 query_vector = await self._embed_query_for_kb(session, kb_id, query)
-                results = self.vector_store.query(
-                    kb_id=kb_id,
-                    query_vector=query_vector,
-                    top_k=150,  # 多召回一些用于融合
-                    score_threshold=score_threshold
-                )
+                results = self._query_vector(session, kb_id, query_vector, 150, score_threshold)
                 for r in results:
                     r["kb_id"] = kb_id
                     vector_results.append(r)

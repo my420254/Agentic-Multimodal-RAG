@@ -8,7 +8,7 @@
 >
 > 你贴的题里，Java / MySQL / B+ 树 / 锁 / 高并发 / 分布式事务 / 库存 / 算法 / Spring Cloud / Nacos / MongoDB / OpenClaw 内部实现，**这个项目没有**。不要硬编，面试官两三层追问就会穿。
 >
-> 另外：前端示例简历里出现了 `pgvector`、`GIN`、`Kafka`、`GraphRAG` 等词，但**代码实际没有用 pgvector、PG FTS、Kafka、RRF、MMR**。简历上如果写了，必须能讲清是“课程/另一个项目”，否则建议删掉或改成真实实现。
+> 另外：代码里 `pgvector` 已经真实接入（`document_chunks.embedding vector(1024)` + HNSW，检索默认走它）；但 **PG FTS/GIN、Kafka、RRF、MMR、GraphRAG 没有用**。简历上不要写这些没落地的词。
 
 ---
 
@@ -35,7 +35,7 @@
 
 > 我做的是一个面向辽宁大学在校生的求职辅助 Agent，核心不是“让大模型聊天”，而是让简历诊断、模拟面试和知识库问答都能落到真实材料上。
 >
-> 后端是 FastAPI + LangGraph。文档入库后，PDF/DOCX 先解析成 chunk，存 PostgreSQL；用 BGE-M3 生成向量存 Chroma；同时用 jieba 在 PG 里建 BM25 倒排统计。检索时向量和 BM25 双路召回，分数归一化后加权融合，可选 BGE-Reranker 精排，再做相邻块/父块扩展。
+> 后端是 FastAPI + LangGraph。文档入库后，PDF/DOCX 先解析成 chunk，存 PostgreSQL；用 BGE-M3 生成 1024 维向量，写入 `document_chunks.embedding`（pgvector + HNSW），Chroma 保留为回滚/对比；同时用 jieba 在 PG 里建 BM25 倒排统计。检索时 pgvector 与 BM25 双路召回，分数归一化后加权融合，可选 BGE-Reranker 精排，再做相邻块/父块扩展。
 >
 > Agent 侧是一个 LangGraph 循环：先做意图识别，闲聊直接回答，知识型问题进入 agent 节点，模型通过 `search_knowledge_base` 工具调用检索；工具返回后经过 observation 和 grading 节点，如果相关性不足就带着建议改写查询重试，最多 3 次；同时有重复工具调用检测，防止死循环。
 >
@@ -60,7 +60,7 @@
 | 17-18 | Workflow vs Runtime、LangGraph State/Node/Edge | ✅ 可答 | 实际 StateGraph 节点和边可讲 |
 | 19 | 中断状态保存/恢复 | ⚠️ 部分 | 会话消息 PG 持久化；LangGraph 在途状态没有 checkpointer，不能假装可恢复 |
 | 20-22 | RAG 全流程、向量 vs 关键词、混合检索 | ✅ 可答 | 实际实现 |
-| 23 | pgvector 和 PG FTS | ❌ 没做 | 项目实际是 Chroma + 应用层 BM25；pgvector/PG FTS 只能讲概念 |
+| 23 | pgvector 和 PG FTS | ⚠️ 部分 | pgvector 已落地（HNSW）；PG FTS/GIN 没做，仍是应用层 BM25 |
 | 24-33 | 向量库选型、Embedding、距离、RAG vs 微调、切块、递归切分、chunk 大小、格式差异 | ✅ 可答 | 切块有真实消融；Embedding 选型只有 BGE-M3 一个，不能编 A/B |
 | 34 | 父子文档/相邻扩展 | ✅ 可答 | 有 `expand_context`，支持 parent_id 与前后块；实际主 KB 的 parent_id 多为空，要如实说 |
 | 35 | Hybrid RAG 双路 TopK | ✅ 可答 | 向量 + BM25 → min-max 归一化 → 加权和 → 去重 → rerank → 扩展；**不是 RRF** |
@@ -68,7 +68,7 @@
 | 39 | RRF | ❌ 没做 | 项目是加权和；RRF 只能讲概念，别说项目用过 |
 | 40 | Rerank | ✅ 可答 | BGE-reranker-v2-m3，放在召回融合之后 |
 | 41 | 元数据过滤/权限 | ⚠️ 部分 | KB owner 权限在 API/工具注入层做了；文档类型/敏感级过滤没做 |
-| 42 | 文档块表设计 | ⚠️ 部分 | PG 存内容/元数据/BM25；向量在 Chroma，不是 PG 的 vector 字段 |
+| 42 | 文档块表设计 | ✅ 可答 | PG 存内容/元数据/BM25 + `embedding vector(1024)`；Chroma 仅回滚/对比 |
 | 43-44 | RAG 不准确排查、无可靠内容处理 | ✅ 可答 | 有真实 bad case；拒答靠提示词 + Agent 提示，无硬性拒答门禁 |
 | 45 | 幻觉治理 | ⚠️ 部分 | 提示词 + RAG + 引用；没有输出校验器/事实核验器 |
 | 46 | 延迟优化、流式输出 | ✅ 可答 | 有实测；流式降低首字等待，不降低总计算 |
@@ -90,7 +90,7 @@
 | 69-70 | 预训练/微调/Prompt、问答/RAG/工具/Agent 区别 | ✅ 通用可答 | 结合项目讲 RAG/工具/Agent 差异 |
 | 71-75 | OpenClaw 个人助手、Gateway/Runtime、记忆、Markdown+SQLite/FTS5 | ❌ 不是本项目 | 只能讲通用理解；不要说项目做过 |
 | 76 | 你的 Agent 项目 | ✅ 可答 | 见第 1 节 |
-| 77 | MongoDB/PostgreSQL/Redis 组合 | ⚠️ 改口径 | 项目是 PostgreSQL + Redis + Chroma，**没有 MongoDB**；不要硬说 Mongo |
+| 77 | MongoDB/PostgreSQL/Redis 组合 | ⚠️ 改口径 | 项目是 PostgreSQL（含 pgvector）+ Redis；Chroma 仅回滚；**没有 MongoDB** |
 | 78 | Spring Cloud/Nacos | ❌ 没做 | 不要答成项目经历 |
 | 79 | 课程预约多轮业务 | ❌ 没做 | 只能讲通用设计 |
 | 80 | LangGraph 用了哪些流程 | ✅ 可答 | 意图、agent、tools、observation、grading、generate_chat；ChatService 负责 SSE/记忆/Prompt |
@@ -213,7 +213,7 @@ RAG = Retrieval-Augmented Generation：先检索外部知识，再把证据放�
 2. 解析：PDF/DOCX 文本、standalone 图片走 Qwen3-VL OCR；
 3. 切块：PDF/DOCX 500 字/50 overlap；图片 OCR 600/80；
 4. 存 PG `document_chunks`；
-5. BGE-M3 embedding（1024 维）→ Chroma；
+5. BGE-M3 embedding（1024 维）→ PostgreSQL pgvector（HNSW），Chroma 保留为回滚/对比；
 6. jieba 分词 + BM25 统计 → PG `chunk_index/index_stats`；
 7. 查询时向量/BM25/hybrid 召回；
 8. 可选 BGE rerank、相邻/父块扩展；
@@ -226,9 +226,9 @@ RAG = Retrieval-Augmented Generation：先检索外部知识，再把证据放�
 - 关键词/BM25：精确词命中，擅长型号、错误码、条款号、人名；弱在同义词/语义改写。
 
 本项目实测（42 条真实简历 golden，39 可评）：
-- vector evidence_all@3 92.31%，MRR 0.7479，平均检索 868.6ms；
-- fulltext 82.05%，MRR 0.8075，平均 131.6ms；
-- hybrid 0.7/0.3 89.74%，MRR 0.7799，平均 1021.8ms。
+- vector evidence_all@3 92.31%，MRR 0.7479，pgvector 平均检索 632.1ms；
+- fulltext 82.05%，MRR 0.8075，平均 151.9ms；
+- hybrid 0.7/0.3 89.74%，MRR 0.7799，pgvector 平均 814.2ms。
 
 结论：这个库上纯向量 all@3 最高，BM25 快 6-8 倍、MRR 更高；混合没有稳定超过纯向量。不要背“混合一定更好”。
 
@@ -242,7 +242,7 @@ RAG = Retrieval-Augmented Generation：先检索外部知识，再把证据放�
 
 考虑：数据规模、是否需要元数据过滤、持久化/备份、部署方式、索引类型、延迟、成本、多租户隔离、与现有栈的集成。
 
-本项目选 Chroma：本地 PersistentClient、零运维、和 Python 集成简单；代价是生产级高可用/权限/监控弱。pgvector 的优势是少一个组件、SQL 事务/权限统一；缺点是向量索引调优和大规模性能要自己做。**本项目没有用 pgvector，别把选型说成已落地。**
+早期用 Chroma（本地 PersistentClient、零运维）；后来迁到 pgvector：向量和 chunk 同表，SQL 事务/权限/过滤统一，HNSW 索引，少一个组件。Chroma 保留为回滚/对比，不是主检索。代价是 pgvector 索引调优和大规模性能要自己做。**现在默认 pgvector，别再说“项目没用 pgvector”。**
 
 ### Q25 用户身份、偏好适合向量检索吗？
 
@@ -264,7 +264,7 @@ RAG = Retrieval-Augmented Generation：先检索外部知识，再把证据放�
 - 欧氏：看绝对距离；对向量长度敏感；
 - 曼哈顿：L1 距离，对异常维度更鲁棒，但高维文本召回不如余弦常用。
 
-本项目 Chroma 用 cosine（`1 - distance/2` 转相似度），BGE-M3 向量适合余弦。不要把三种距离说成项目都试过。
+本项目 pgvector 用 cosine distance（`1 - distance` 转相似度），BGE-M3 向量适合余弦；Chroma 旧路径用 `1 - distance/2`。不要把三种距离说成项目都试过。
 
 ### Q28 RAG 和微调的区别？
 
@@ -319,7 +319,7 @@ RAG = Retrieval-Augmented Generation：先检索外部知识，再把证据放�
 ### Q35 Hybrid RAG 双路 TopK 怎么得到？
 
 本项目：
-1. 向量检索 Chroma top 150（融合用），BM25 top 50；
+1. pgvector 向量检索 top 150（融合用），BM25 top 50；
 2. 两路分别 min-max 归一化；
 3. `fused = vector_weight * v + bm25_weight * b`，默认 0.7/0.3；
 4. 按 fused 排序取 top_k；
@@ -381,14 +381,14 @@ RRF：`score = Σ 1/(k + rank_i)`，只看排名，不看原始分数，避免�
 - 父子/结构：`parent_id`、`heading_level`、`heading_text`、`chunk_type`、`token_count`；
 - `file_documents` 存文件名/路径/大小/状态；
 - `chunk_index` 存 BM25 的 `terms`/`doc_length`，`index_stats` 存 N/avg_dl/df；
-- 向量不在 PG，在 Chroma collection `kb_<kb_id>`。
+- 向量在 PG `document_chunks.embedding vector(1024)`，HNSW 索引 `ix_document_chunks_embedding_hnsw`；Chroma 仅回滚/对比。
 
 为什么原文和元数据都要：原文用于生成/引用；元数据用于定位、过滤、扩展；BM25 统计用于关键词召回；向量用于语义召回。
 
 ### Q43 RAG 回答不准确，从哪些环节排查？
 
 真实排查顺序：
-1. 数据在不在：文件是否 READY、chunk 数、PG/Chroma 是否一致；
+1. 数据在不在：文件是否 READY、chunk 数、PG embedding 覆盖数 / Chroma 是否一致；
 2. 切块：是否太大/太小/把答案切断（本项目 PDF 2 块导致简历题全丢，是真实 case）；
 3. 分词：中文 BM25 是否退化成按字（本项目缺 jieba 时召回明显差）；
 4. 召回：vector/fulltext/hybrid 分别命中没有，top_k/阈值/权重；
@@ -415,7 +415,7 @@ RRF：`score = Σ 1/(k + rank_i)`，只看排名，不看原始分数，避免�
 
 优化：embedding 缓存、BM25/向量并行、top_k 控制、rerank 只跑小候选、上下文扩展限制、检索缓存、模型流式、超时/降级。
 
-本项目实测：vector 平均 868.6ms（含网络 embedding），BM25 131.6ms，hybrid 1021.8ms；rerank 让 TTFT 从 2.99s 到 3.70s。流式只降低“首字等待”的体感，不降低总计算/总 token；TTFT 和总耗时是两回事。
+本项目实测（pgvector）：vector 平均 632.1ms（含网络 embedding），BM25 151.9ms，hybrid 814.2ms；rerank 让 TTFT 从 2.99s 到 3.70s（TTFT 是 Chroma 时期单条样本，pgvector 切换后未重跑）。流式只降低“首字等待”的体感，不降低总计算/总 token；TTFT 和总耗时是两回事。
 
 ### Q47 为什么记忆分短期/中期/长期？
 
@@ -501,7 +501,7 @@ CoT 是让模型显式写推理步骤；ToT 是树状展开多条推理路径 + 
 
 ### Q23 pgvector / PG FTS
 
-pgvector 是 PG 的向量类型 + 索引；PG FTS 是 tsvector/tsquery/GIN。本项目实际是 Chroma + 应用层 BM25；可以讲两者的原理和选型，但不能说“项目用了 pgvector/GIN”。
+pgvector 是 PG 的向量类型 + 索引；PG FTS 是 tsvector/tsquery/GIN。本项目 pgvector 已真实落地（vector(1024) + HNSW + cosine 距离）；PG FTS/GIN 没做，关键词仍是应用层 BM25。可以讲两者原理和选型，但不要说“项目用了 GIN”。
 
 ### Q36-38 PG 全文检索
 
@@ -529,7 +529,7 @@ pgvector 是 PG 的向量类型 + 索引；PG FTS 是 tsvector/tsquery/GIN。本
 
 ### Q77 MongoDB
 
-项目是 PostgreSQL + Redis + Chroma，没有 MongoDB。可以讲“为什么不需要 Mongo：文档 chunk 是结构化 + 需要 SQL 事务/权限；向量用 Chroma；缓存用 Redis”。不要说“我们选了 MongoDB”。
+项目是 PostgreSQL（含 pgvector）+ Redis，Chroma 仅回滚，没有 MongoDB。可以讲“为什么不需要 Mongo：文档 chunk 是结构化 + 需要 SQL 事务/权限；向量用 pgvector；缓存用 Redis”。不要说“我们选了 MongoDB”。
 
 ### Q78 Spring Cloud / Nacos
 
@@ -578,9 +578,9 @@ pgvector 是 PG 的向量类型 + 索引；PG FTS 是 tsvector/tsquery/GIN。本
 修复：安装 jieba，重建 chunk_index/index_stats。
 教训：中文 BM25 的效果很大程度取决于分词。
 
-### 故事 6：Redis 旧提示词覆盖导致 GraphRAG 又出现
+### 故事 6：Redis 旧提示词覆盖导致旧模板又出现
 
-现象：代码已删 GraphRAG，但 API 仍返回旧模板。
+现象：代码已更新默认提示词，但 API 仍返回旧模板。
 定位：`is_custom=True`，Redis `u:{uid}:prompts` 有旧覆盖。
 修复：reset 用户提示词；代码侧保持“默认模板 + 用户覆盖”分离。
 教训：配置/缓存迁移要和代码迁移一起做。
@@ -602,9 +602,9 @@ pgvector 是 PG 的向量类型 + 索引；PG FTS 是 tsvector/tsquery/GIN。本
 - golden：42 条（39 可评 + 3 拒答）；evidence 逐条对照 corpus；
 - 检索指标：evidence_all@3 / evidence_any@3 / MRR / latency；
 - 结果：
-  - vector：92.31% / 97.44% / 0.7479 / 868.6ms；
-  - fulltext：82.05% / 84.62% / 0.8075 / 131.6ms；
-  - hybrid 0.7/0.3：89.74% / 92.31% / 0.7799 / 1021.8ms；
+  - vector：92.31% / 97.44% / 0.7479 / 632.1ms（pgvector）；
+  - fulltext：82.05% / 84.62% / 0.8075 / 151.9ms；
+  - hybrid 0.7/0.3：89.74% / 92.31% / 0.7799 / 814.2ms（pgvector）；
   - hybrid 0.8/0.2：92.31% / 94.87% / 0.7274；
   - BM25 k1/b 9 组：all@3 均 82.05%，MRR 最高 0.8465（k1=2.0,b=0.9）。
 
@@ -621,17 +621,25 @@ pgvector 是 PG 的向量类型 + 索引；PG FTS 是 tsvector/tsquery/GIN。本
 - Agent 模式：TTFT 5.73s / 总 5.74s；
 - **都是单条样本，不是 P95**；要写 P95 需要 ≥20 条。
 
-### 6.4 测试
+### 6.4 pgvector 迁移结果
+
+- PostgreSQL 18.6 + pgvector 0.8.1；
+- `document_chunks.embedding vector(1024)`，HNSW `vector_cosine_ops` 索引；
+- Chroma 328 条向量全部回填到 PG：`328/328`，维度 1024；
+- 检索默认走 pgvector；Chroma 保留为回滚/对比；
+- 同一批 39 条 golden 指标不变：vector all@3 92.31%，hybrid 89.74%；
+- 平均检索延迟：vector 632.1ms、fulltext 151.9ms、hybrid 814.2ms（pgvector 实测，非受控对比）。
+
+### 6.5 测试
 
 - `make test-fast`：13 passed；
 - 30 条越权 + 持久化 + KB + owner 隔离：36 passed；
-- 全量 `python3 -m pytest tests -q`：**80 passed in 38.73s**（2026-10-18 实跑）；
+- 全量 `python3 -m pytest tests -q`：**78 passed in 41.02s**（GraphRAG 测试删掉后实跑）；
 - 前端 build：通过；
-- **但 80/80 不等于 80 条都在测它名字声称的能力**：
-  - `test_sliding_window_rate_limiter_1000_qps` 不是 1000 QPS 压测；
-  - `test_pgvector_extension_active` 只检查扩展是否存在，检索不走 pgvector；
-  - `test_lora_service.py` 测登记表，不是训练好的 LoRA；
-  - `test_graphrag_subgraph_traversal` 测手写技能图，不是文档图谱。
+- **但 78/78 不等于 78 条都在测它名字声称的能力**：
+  - 原 `test_sliding_window_rate_limiter_1000_qps` 已改名为 `test_sliding_window_rate_limiter_limit`，且注释“不是压测”；
+  - `test_pgvector_extension_active` 现在检查扩展 + vector 列 + HNSW 索引，但**不检查召回质量**；
+  - `test_lora_service.py` 测登记表，不是训练好的 LoRA。
 - 部分测试依赖真实 LLM/网络；面试现场要稳定，先加 mock（`pytest-mock`/`unittest.mock`）做离线回归，否则断网会翻车。
 
 ---
@@ -640,7 +648,7 @@ pgvector 是 PG 的向量类型 + 索引；PG FTS 是 tsvector/tsquery/GIN。本
 
 如果只基于当前仓库，**不要写**：
 
-- pgvector / PG GIN / tsvector / RRF / MMR（除非你真的实现了）；
+- PG GIN / tsvector / RRF / MMR / Kafka / GraphRAG（这些没落地）；pgvector 已落地，可以写；
 - Kafka（项目没有用 Kafka）；
 - MCP / Skills 渐进加载 / A2A；
 - 多 Agent 子图 / Plan-and-Execute / ToT / Reflexion；
@@ -660,7 +668,7 @@ pgvector 是 PG 的向量类型 + 索引；PG FTS 是 tsvector/tsquery/GIN。本
 
 ## 8. 被追问时的诚实话术
 
-- “这个项目没有用 pgvector，我们用的是 Chroma；pgvector 是另一种选型，我可以讲差异，但不能说项目落地了。”
+- “pgvector 已经落地：document_chunks.embedding vector(1024) + HNSW，检索默认走它；Chroma 只保留回滚/对比。PG FTS/GIN 没有做，关键词是应用层 BM25。”
 - “RRF 我们没实现，当前是 min-max 归一化后加权和；RRF 是后续可做的改进。”
 - “MCP/Skills/多 Agent 这个项目没有做，我只在概念上了解；如果岗位需要，我可以讲设计思路，但不会把它说成项目经历。”
 - “LangGraph 的在途状态没有 checkpointer，服务重启后会话消息能恢复，图执行不能从中间恢复。”
@@ -673,7 +681,7 @@ pgvector 是 PG 的向量类型 + 索引；PG FTS 是 tsvector/tsquery/GIN。本
 
 可以答“数据/索引/权限三者的一致性”，并举两个真实例子：
 
-1. 真实简历未入 PG、Chroma 路径错位导致 PG 219 vs Chroma 16；
+1. 真实简历未入 PG、Chroma 路径错位导致 PG 219 vs Chroma 16；后来把向量回填到 pgvector，PG 328/328 覆盖；
 2. Agent 空 kb_ids 回退全库导致越权。
 
 这两个都能讲清“现象 → 定位 → 修复 → 验证 → 防回归”，比背八股强。
@@ -767,7 +775,7 @@ Skill 的核心是**能力包 + 渐进式加载**：名称/描述先给模型，
 
 ## 11. 对“全量审计报告”的采纳清单
 
-审计报告的大方向是对的：**按真实代码讲、指标要能复现、不要写 Go/Kafka/pgvector/RLS 这些没落地的东西**。但不能整份照收，下面几条必须修正。
+审计报告的大方向是对的：**按真实代码讲、指标要能复现、不要写 Go/Kafka/RLS/GraphRAG 这些没落地的东西**。但不能整份照收，下面几条必须修正。
 
 ### 11.1 应该采纳的
 
@@ -776,7 +784,7 @@ Skill 的核心是**能力包 + 渐进式加载**：名称/描述先给模型，
 - 面试前准备可复现的测试/演示命令；
 - 给依赖网络的测试加 mock，保证现场断网也能跑；
 - 承认前端 bundle 偏大，生产要做 manualChunks；
-- 简历只写真实技术栈：FastAPI + LangGraph + PostgreSQL + Redis + Chroma + BGE-M3。
+- 简历只写真实技术栈：FastAPI + LangGraph + PostgreSQL + pgvector + Redis + BGE-M3（Chroma 可写“回滚/对比”，不要写主检索）。
 
 ### 11.2 必须修正/不要照抄的
 
@@ -784,21 +792,21 @@ Skill 的核心是**能力包 + 渐进式加载**：名称/描述先给模型，
 | :--- | :--- |
 | “AST 结构化事实保真护栏” | 代码里没有 AST；archive PRD 里有设计，当前实现是提示词/占位符约束 |
 | “PostgreSQL RLS 行级隔离” | 没有 RLS；是 `owner_id` 查询过滤 + 404 隐藏存在性 |
-| “GraphRAG 代码已删” | 没删；`mock_interview.py`、`career.py` 仍 import/调用 `graphrag_service` |
+| “GraphRAG 代码已删” | 本次改造已真删（服务/接口/字段/测试），但审计当时没删；现在可答“已移除” |
 | “BGE-Reranker-large” | 当前报告用的是 `BAAI/bge-reranker-v2-m3`；large 是 archive PRD 的旧口径 |
 | “8 份 benchmark 样本” | `data/benchmark_resumes` 只有 4 份对抗样本；4 份真实简历在 `data/真实简历` |
 | “L2 摘要存 interview_messages” | 摘要存 `interview_sessions.summary`；`interview_messages` 存逐条消息 |
 | “Go/Kafka 生产能力” | 没有 Go 源码；只有 `docs/archive/PRD_Campus_Career_Agent_Gin_Kafka.md` 设计稿 |
-| “80/80 证明这些能力都做了” | 80/80 是事实，但测试名与内容有偏差（见 6.4） |
+| “80/80 证明这些能力都做了” | 当前是 78/78（GraphRAG 测试删除后），且测试名与内容有偏差（见 6.4） |
 
 ### 11.3 比 RRF/MCP/Skills 更优先的 P0：先把叙事和代码对齐
 
-1. **删掉实验室署名**：`prompt_service.py`、`career_matcher.py`、`job_fraud_detector.py`、`mock_interview.py`、`graphrag_service.py`、`api/career.py`、前端 `CareerCenter` 都有“辽宁省公共舆情与网络安全信息系统重点实验室”；你的材料里没有这个单位，全部删掉或改成真实单位。
-2. **删掉 `career_matcher` 里硬编码的假技术**：`“采用 PostgreSQL GIN 倒排 + pgvector HNSW 双路并行召回，配合 BGE-Reranker-large”` 与真实实现不符，必须改成“BGE-M3 + jieba BM25 + Chroma + 可选 BGE-Reranker-v2-m3”，否则模型会把假话输出给用户。
-3. **处理 GraphRAG**：要么从模拟面试/API/UI 移除，要么明确标注“静态技能图，不是文档图谱”；不要再说“已删”。
+1. **保留真实实验室署名**：辽宁省公共舆情与网络安全信息系统重点实验室是真实单位，不删；统一各文件口径即可。
+2. **`career_matcher` 假技术已清**：默认 STAR 示例不再写 RRF/GIN/Reranker-large/14.2%；改成 BGE-M3 + jieba BM25 + pgvector + 可选 BGE-Reranker-v2-m3，未测数字用占位符。
+3. **GraphRAG 已移除**：服务/接口/字段/测试已删；`/career/skill-graph`、`/career/graphrag/subgraph` 现在 404；文档同步改口径。
 4. **模拟面试四阶段/1-10 分**：当前阶段由轮次驱动、分数由模型自报；要么改成检索原文驱动，要么 UI 不显示阶段/分数，只显示“材料支持/材料没有”。
 5. **PRD/交接文档**：`docs/PRD.md` 第 0 章、`docs/HANDOFF.md` 与现状不一致；对外只使用 `docs/INTERVIEW_QA.md` + `backend/benchmark/report.md`，或把旧文档移到 `docs/archive/`。
-6. **测试命名**：`1000_qps`、`pgvector_extension_active` 这类名字要么改，要么加注释；不要拿它们当“高并发/pgvector 已落地”的证据。
+6. **测试命名**：原 `1000_qps` 已改名且注释“不是压测”；`pgvector_extension_active` 已加列/索引断言；仍建议给网络依赖测试加 mock。
 
 ### 11.4 优先级结论
 
@@ -817,7 +825,7 @@ P0 叙事/事实对齐
   → P1 RRF 可配置 + A/B
   → P2 真实 MCP Server/Client（工具接入层演示）
   → P3 真实 Skills（manifest + 渐进加载 + 至少 3 个能力包）
-  → P4 pgvector/PG FTS（只有想统一存储时才做）
+  → P4 PG FTS/GIN（只有要做中文 DB 全文检索时才做；pgvector 已完成）
 ```
 
-**RRF 合理，MCP 有边界，Skills 最后。** 但三者都不能替代 P0；如果实验室署名、假的 pgvector/GIN、GraphRAG、模拟面试分数还在，加再多协议和 Skill 只会让追问更容易穿。
+**RRF 合理，MCP 有边界，Skills 最后。** 但三者都不能替代 P0；如果模拟面试分数、旧 PRD、测试命名还在，加再多协议和 Skill 只会让追问更容易穿。

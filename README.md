@@ -33,7 +33,7 @@
 
 - **多模态文档解析**：提取正文、标题层级、表格与图片内容，并保留文档结构信息。
 - **查询增强与并行召回**：支持复杂问题拆分、HyDE 假设文档生成，并针对多个子问题并行执行检索。
-- **双路混合检索**：结合 Chroma 向量检索和 BM25 全文检索，兼顾语义理解与精确关键词命中。
+- **双路混合检索**：结合 pgvector 向量检索和 BM25 关键词检索，兼顾语义理解与精确关键词命中；Chroma 仅保留回滚/对比。
 - **父子 Chunk 与上下文恢复**：命中子 Chunk 后可拼接父文档及相邻 Chunk，减少孤立片段带来的语义缺失。
 - **本地与远程双模式 Rerank**：本地 Cross-Encoder 自动选择 CUDA 或 CPU，也可接入远程 Rerank API。
 - **可解释的 Agent 执行轨迹**：基于 LangGraph 展示意图分析、任务拆分、工具调用、检索耗时、质量判断和低相关性重试。
@@ -83,7 +83,7 @@ Agent 会分析意图、拆分子问题、生成检索查询、调用工具并�
 flowchart LR
     A["PDF / Word / Excel / Markdown / Image"] --> B["结构化解析"]
     B --> C["标题感知与语义切分"]
-    C --> D["Chroma 向量索引"]
+    C --> D["pgvector 向量索引"]
     C --> E["BM25 全文索引"]
 
     Q["用户问题"] --> F["检索策略"]
@@ -121,7 +121,7 @@ Document Pipeline          Agent Workflow
      |                          |
 Parser -> Chunk -> Index    Intent -> Retrieve -> Observe -> Retry
      |                          |
-     +----> Chroma / BM25 <-----+
+     +----> pgvector / BM25 <-----+
                  |
        Rerank / Context Expansion
                  |
@@ -132,9 +132,9 @@ Parser -> Chunk -> Index    Intent -> Retrieve -> Observe -> Retry
 
 - Backend：FastAPI、SQLModel、LangGraph、Celery（可选）
 - Frontend：React、TypeScript、Vite、Ant Design
-- Retrieval：Chroma、BM25、Cross-Encoder/API Rerank
+- Retrieval：pgvector、BM25、Cross-Encoder/API Rerank
 - Models：Ollama 或 OpenAI-compatible API
-- Storage：SQLite、文件存储、Chroma 持久化目录
+- Storage：PostgreSQL（含 pgvector）、Redis、文件存储；Chroma 仅回滚
 
 ## 快速开始
 

@@ -12,7 +12,6 @@ import os
 from app.services.job_fraud_detector import job_fraud_detector, FraudDetectionResult
 from app.services.career_matcher import career_matcher_service, CareerMatchResult, ResumeSection
 from app.services.mock_interview import mock_interview_service, InterviewTurnResponse
-from app.services.graphrag_service import graphrag_service
 from app.services.prompt_service import prompt_workshop_service
 from app.services.parser import FileParser
 from app.core.rate_limiter import global_rate_limiter
@@ -211,25 +210,6 @@ async def clear_session_memory(
         raise HTTPException(status_code=404, detail="会话不存在")
     memory_service.clear_session(uid, session_id)
     return {"message": f"会话 {session_id} 的全部记忆缓存已成功清除"}
-
-
-@router.get("/skill-graph")
-async def get_skill_graph():
-    """
-    【GraphRAG 技能拓扑图谱】
-    获取全量技能节点与前驱后继关系图谱
-    """
-    return graphrag_service.get_full_graph()
-
-
-@router.get("/graphrag/subgraph")
-async def get_graphrag_subgraph(query: str = "redis"):
-    """
-    【GraphRAG 子图多跳检索】
-    根据关键词多跳遍历关联技能实体、考点与拓扑路径
-    """
-    subgraph = graphrag_service.search_subgraph(query, max_depth=2)
-    return subgraph
 
 
 @router.get("/prompts")

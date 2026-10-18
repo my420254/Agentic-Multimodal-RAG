@@ -4,7 +4,7 @@
 | :--- | :--- |
 | 产品名 | **LNUCareer-Agent** — 辽宁大学在校生求职辅助 Agent |
 | 文档状态 | **终版，唯一实施基线**（v1 / v2.0 / v3 已归档至 `docs/archive/`） |
-| 技术基线 | Python 3.14 / FastAPI / SQLModel / LangGraph / Chroma / PostgreSQL 16 / Redis 7 / React + Vite |
+| 技术基线 | Python 3.14 / FastAPI / SQLModel / LangGraph / pgvector / PostgreSQL 18.6 / Redis 7 / React + Vite |
 | 验证环境 | WSL2 Ubuntu，实测启动通过（见第 0 章，含命令与输出） |
 | 定位一句话 | **让每条建议可回溯、每个分数有证据、每次面试可复现。** |
 
@@ -174,9 +174,9 @@ React(3000) ──axios/SSE──> FastAPI(8000)
                               ├─ agent_workflow.py  (LangGraph)
                               ├─ retrieval + bm25 + rerank
                               ├─ career: match / interview / fraud / prompts
-                              ├─ memory_service (Redis)
-                              └─ SQLModel ──> PostgreSQL(5432)  [仅 RAG 侧 8 表]
-                                          └─> Chroma (storage/chroma_db)
+                              ├─ memory_service (PostgreSQL 真源 + Redis 缓存)
+                              └─ SQLModel ──> PostgreSQL(5432)  [12 表 + pgvector]
+                                          └─> Chroma (storage/chroma_db, 仅回滚/对比)
 Celery + Redis(6379)  ── 解析/向量化异步任务
 外部模型：DeepSeek(LLM) + SiliconFlow(BGE-M3) + Qwen3-VL
 ```
@@ -190,7 +190,7 @@ React ──> FastAPI ──> [鉴权中间件] ──> 业务层
                          │                 ├─ report (评分/趋势)
                          │                 └─ chat (双模式)
                          ├── PostgreSQL: + users/materials/sessions/turns/scores/reports/profile_items/events/tool_calls/audit_logs
-                         ├── Chroma: metadata 强制 owner_id
+                         ├── pgvector: document_chunks.embedding + HNSW；JOIN knowledge_bases 强制 owner_id
                          └── Redis: L1 / 限流 / 锁（key 前缀 u:{uid}:）
 ```
 
@@ -218,7 +218,7 @@ React ──> FastAPI ──> [鉴权中间件] ──> 业务层
 - **规则**：
   1. `user_id` **只从 token 取**；Body/Query 中的 `user_id` 一律忽略。
   2. 仓储层统一注入 `WHERE owner_id = ?`。
-  3. Chroma 查询强制 `where={"owner_id": uid}`。
+  3. pgvector 查询通过 `JOIN knowledge_bases` 强制 `owner_id IS NULL OR owner_id = ?`。
   4. Redis key `u:{uid}:...`。
   5. 注销：事务内级联删除 DB / 文件 / 向量 / Redis，60s 内生效。
 - **异常**：token 过期 → 401；他人资源 → 404（不泄露存在性）。

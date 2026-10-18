@@ -98,6 +98,80 @@ class VectorStoreService:
             else:
                 raise e
 
+        # PostgreSQL pgvector 同步：Chroma 仍保留用于回滚/对比
+        if settings.VECTOR_BACKEND == "pgvector":
+            self._sync_pg_embeddings(documents, embeddings)
+
+    def query_pgvector(
+        self,
+        session,
+        kb_id: str,
+        query_vector: List[float],
+        top_k: int = 5,
+        score_threshold: float = 0.0,
+    ) -> List[Dict[str, Any]]:
+        """PostgreSQL pgvector 余弦检索（与 Chroma 并存，默认走这里）。"""
+        from sqlalchemy import select
+        from app.models import DocumentChunk, FileDocument
+
+        distance = DocumentChunk.embedding.cosine_distance(query_vector).label("distance")
+        stmt = (
+            select(DocumentChunk, distance)
+            .join(FileDocument, DocumentChunk.file_id == FileDocument.id)
+            .where(
+                FileDocument.kb_id == kb_id,
+                DocumentChunk.embedding.isnot(None),
+            )
+            .order_by(distance)
+            .limit(top_k)
+        )
+        rows = session.execute(stmt).all()
+        output: List[Dict[str, Any]] = []
+        for row in rows:
+            chunk, dist = row[0], row[1]
+            score = 1.0 - float(dist)
+            if score < score_threshold:
+                continue
+            output.append({
+                "id": chunk.id,
+                "content": chunk.content,
+                "metadata": {
+                    "file_id": chunk.file_id,
+                    "page_number": chunk.page_number,
+                    "content_type": chunk.content_type.value if hasattr(chunk.content_type, "value") else str(chunk.content_type),
+                    "image_path": chunk.image_path,
+                    "original_index": chunk.original_index,
+                },
+                "score": score,
+            })
+        return output
+
+    def _sync_pg_embeddings(self, documents: List[Dict[str, Any]], embeddings: List[List[float]]) -> None:
+        """把刚写入 Chroma 的向量同步到 PostgreSQL document_chunks.embedding。"""
+        from sqlmodel import Session
+        from app.core.database import engine
+        from app.models import DocumentChunk
+
+        with Session(engine) as session:
+            for doc, emb in zip(documents, embeddings):
+                chunk = session.get(DocumentChunk, doc["id"])
+                if chunk is None:
+                    continue
+                chunk.embedding = [float(x) for x in emb]
+                session.add(chunk)
+            session.commit()
+
+    def get_pgvector_count(self, session, kb_id: str) -> int:
+        from sqlmodel import func, select
+        from app.models import DocumentChunk, FileDocument
+
+        return int(session.exec(
+            select(func.count())
+            .select_from(DocumentChunk)
+            .join(FileDocument, DocumentChunk.file_id == FileDocument.id)
+            .where(FileDocument.kb_id == kb_id, DocumentChunk.embedding.isnot(None))
+        ).one())
+
     def query(
         self,
         kb_id: str,

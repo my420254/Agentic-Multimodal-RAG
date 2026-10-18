@@ -81,7 +81,7 @@ class CareerMatcherService:
         "python", "go", "golang", "c++", "java", "sql", "linux", "git", "docker", "k8s",
         "fastapi", "gin", "goframe", "flask", "django", "vue", "react",
         "redis", "mysql", "postgresql", "kafka", "qdrant", "milvus", "pgvector",
-        "rag", "graphrag", "agent", "langchain", "langgraph", "vllm", "lora",
+        "rag", "agent", "langchain", "langgraph", "vllm", "lora",
         "bge", "bm25", "rerank", "llm-as-a-judge", "mcp", "sse", "hitl", "awq"
     ]
 
@@ -239,43 +239,43 @@ class CareerMatcherService:
         """端到端执行双向匹配分析，并生成 STAR 简历修改重构方案"""
         metrics = self.calculate_match_metrics(resume_text, jd_text)
         
-        # 默认优质 STAR 示例储备（事实保真：严禁凭空脑补数字，未测数据提示候选人补充实测）
+        # 默认 STAR 示例：只描述真实技术栈，所有未测数字一律占位，禁止编造
         star_optimizations: List[StarRewriteSuggestion] = [
             StarRewriteSuggestion(
                 original_snippet="负责构建检索模块，使用 BM25 和向量进行混合检索，提升回答准确率。",
-                weakness_analysis="原句描述偏口语化，未说明融合算法（如 RRF）、缺乏具体召回维度与量化评测增益指标。",
-                star_rewrite="【STAR 规范重写】针对垂直场景单一向量检索易产生长尾漏召回问题（S），设计加权 RRF 混合检索管线（BM25: 0.4 + BGE: 0.6）（T/A）；引入 Cross-Encoder 重排器压制长尾噪声，最终将 Top-3 检索准确率提升至 84.5%（绝对提升 14.2%），MRR@3 达到 0.72（R）。",
-                situation="垂直领域长程问答中，单通道 Dense 或纯关键词检索易产生长尾漏召回与知识幻觉",
-                task="设计多通道融合与高精度重排检索链路，提升 Top-K 召回精准度与抗噪能力",
-                action="采用 PostgreSQL GIN 倒排 + pgvector HNSW 双路并行召回，配合 BGE-Reranker-large 交叉编码精排",
-                result="端到端检索准确率绝对提升 14.2%，P99 检索时延控制在 25ms 以内"
+                weakness_analysis="原句没有说明融合方式、召回范围与评测口径，也没有给出可复现的数字。",
+                star_rewrite="【STAR 规范重写】针对单一向量检索在专有名词/型号上易漏召回的问题（S），设计 BGE-M3 向量 + jieba BM25 加权融合，并可选 BGE-Reranker-v2-m3 精排（T/A）；在真实 golden 上按 evidence_all@3 / MRR 评测，具体数值请填入你的实测结果（R）。",
+                situation="垂直领域问答中，纯向量检索对型号、错误码、专有名词容易语义弥散",
+                task="设计向量与关键词双路召回、融合与可选重排链路，并用固定评测集验证",
+                action="BGE-M3 向量 + jieba BM25 加权融合；pgvector HNSW 存向量，PostgreSQL 存 chunk 与 BM25 统计；可选 BGE-Reranker-v2-m3",
+                result="[请填入真实 golden 的 evidence_all@3 / MRR；未测过的提升百分比不要写]"
             ),
             StarRewriteSuggestion(
                 original_snippet="做了系统的高并发优化，使用 Redis 进行缓存和限流。",
-                weakness_analysis="缺乏并发指标（QPS/时延）、未阐明具体限流算法（令牌桶/滑动窗口）及底层原子性保障方案。",
-                star_rewrite="【STAR 规范重写】针对峰值突发流量下数据库连接池被打满风险（S），设计基于 Redis 7 ZSet + Lua 脚本的原子滑动窗口限流器（T/A）；经 Locust 压测基准验证，在并发脉冲下实现 100% 流量合规拦截，接口 P99 响应时延缩减 35% [注：请结合本地实际压测补充具体吞吐QPS]（R）。",
-                situation="高并发突发请求易击穿后端数据库连接池，造成服务雪崩与级联超时",
-                task="实现高性能分布式滑动窗口防刷与流量削峰保护机制",
-                action="通过 Redis ZSet 有序集合维护微秒级时间窗口，封装 Lua 脚本保证判定与计数写入的原子性",
-                result="经本地 Locust 基准压测验证，异常暴增流量拦截率达 100%，CPU 利用率稳定在 45% 以下 [请填入真实压测QPS]"
+                weakness_analysis="没有说明限流算法、原子性保障和测试方法，也没有真实 QPS/P99。",
+                star_rewrite="【STAR 规范重写】针对突发流量下接口被刷的风险（S），设计基于 Redis ZSet + Lua 的原子滑动窗口限流器（T/A）；用真实压测补充 QPS/P99 与拦截率（R）。",
+                situation="单机接口在突发流量下需要阈值保护，避免下游被打满",
+                task="实现滑动窗口限流并保证判定与计数写入的原子性",
+                action="Redis ZSet 维护时间窗口，Lua 脚本保证判定+写入原子性；注意这是单机/单实例限流，不是分布式全局限流",
+                result="[请填入真实压测 QPS/P99；未压测就不要写数字]"
             )
         ]
 
         key_advantages = [
-            "硕士学历且具备 211 重点实验室科研背景，具有顶会论文（CCF 一作）学术沉淀",
-            "深度掌握 Agentic 状态机、多智能体协同（MCP/Supervisor）与高并发工程架构",
-            "具有真实中科院/知名企业大模型落地实习经历，兼备算法理解与后端高并发落地能力"
+            "按简历中真实出现的技术关键词与目标 JD 做匹配，不替候选人补造经历",
+            "STAR 重写只重组已有事实；没有实测数据的地方保留 [请补充真实数据] 占位",
+            "面试追问建议围绕简历里已写的技术点展开，避免问没有做过的组件",
         ]
 
         interview_focus_topics = [
-            "混合检索中 BM25 与 Dense 向量的加权权重调优依据及 RRF 参数整定",
-            "高并发场景下 Redis 缓存穿透/雪崩预防及分布式锁（Redlock/Lua）原子性保证",
-            "基于 LangGraph 的状态机回滚、死循环熔断与长程记忆压缩机制",
-            "多模态简历结构化解析时表格与跨页排版的版面还原方案"
+            "混合检索的融合策略取舍：加权和与 RRF 的指标差异",
+            "向量检索与 BM25 各自擅长的 query 类型及权重依据",
+            "LangGraph 工具循环的重试上限、重复调用熔断与状态恢复边界",
+            "多模态简历解析中表格/跨页版面的还原与引用定位",
         ]
 
         mentor_summary = (
-            f"根据【辽宁省公共舆情与网络安全信息系统重点实验室】就业评估系统测算，"
+            f"根据【辽宁省公共舆情与网络安全信息系统重点实验室】关键词匹配的初步评估，"
             f"候选人简历与目标岗位综合匹配度为 {metrics['overall_match_score']} 分（{metrics['match_level']}）。"
             f"硬技术栈契合度较高（已覆盖 {', '.join(metrics['matched_skills'][:6])} 等关键技能）。"
             f"建议针对目标 JD 中强调的工程高并发指标与技能缺口（如 {', '.join(metrics['missing_skills'][:3]) if metrics['missing_skills'] else '架构健壮性'}），"
@@ -284,7 +284,7 @@ class CareerMatcherService:
 
         critical_weaknesses = [
             "【量化指标缺失】：项目成果多为'提高吞吐量'、'优化模型'等定性陈述，缺乏具体的基准提升百分比、P99 延迟缩减或 QPS 吞吐数字",
-            "【技术深度欠缺】：仅罗列了使用了 Redis/FastAPI/Kafka，未深入阐述底层机制（如并发限流中的 Lua 原子性、状态机快照与死循环回滚）",
+            "【技术深度欠缺】：仅罗列技术名词，未深入阐述底层机制（如限流原子性、状态机重试与死循环熔断）",
             "【业务场景闭环】：未体现出针对极端边界场景（如缓存雪崩、高并发连接池打满、长尾噪声）的容错降级与兜底自愈方案"
         ]
 

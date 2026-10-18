@@ -15,13 +15,25 @@ def test_postgres_connection_and_version():
 
 
 def test_pgvector_extension_active():
-    """验证 pgvector 扩展插件已成功激活"""
+    """验证 pgvector 扩展、向量列与 HNSW 索引真实存在"""
     with Session(engine) as session:
-        result = session.exec(
+        ext = session.exec(
             text("SELECT extname, extversion FROM pg_extension WHERE extname = 'vector';")
         ).first()
-        assert result is not None
-        assert result[0] == "vector"
+        assert ext is not None and ext[0] == "vector"
+
+        col = session.exec(text(
+            "SELECT data_type, udt_name FROM information_schema.columns "
+            "WHERE table_name='document_chunks' AND column_name='embedding';"
+        )).first()
+        assert col is not None, "document_chunks.embedding 列不存在"
+        assert col[1] == "vector"
+
+        idx = session.exec(text(
+            "SELECT indexname FROM pg_indexes "
+            "WHERE tablename='document_chunks' AND indexname='ix_document_chunks_embedding_hnsw';"
+        )).first()
+        assert idx is not None, "pgvector HNSW 索引不存在"
 
 
 def test_database_tables_exist():

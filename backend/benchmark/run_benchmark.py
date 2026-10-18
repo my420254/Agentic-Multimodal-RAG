@@ -8,7 +8,12 @@
    - Hybrid + Rerank: 向量 + BM25 混合检索 + Rerank 重排 (普通模式)
    - Agentic RAG: 完整 Agent 工作流 (意图分流 + 自主检索 + 反思评估 + 3层记忆)
 3. 自动生成 Markdown 格式的评测消融对比表与质量报告
+
+DEPRECATED：本脚本中的 60%+/85%+、BGE-Reranker-large 等结论未与当前数据对齐，
+禁止引用或用于简历。请使用 `eval_personal_kb.py` + `backend/benchmark/report.md`。
 """
+
+raise SystemExit("DEPRECATED: use eval_personal_kb.py; this script contains old unvalidated numbers")
 
 import os
 import sys

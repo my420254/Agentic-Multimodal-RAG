@@ -3,7 +3,8 @@
 """
 
 from sqlmodel import SQLModel, Field, Relationship
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import Column, UniqueConstraint
+from pgvector.sqlalchemy import Vector
 from typing import Optional, List
 from datetime import datetime, timezone
 from enum import Enum
@@ -98,6 +99,12 @@ class DocumentChunk(SQLModel, table=True):
     heading_text: Optional[str] = Field(default=None)   # 标题文本
     chunk_type: str = Field(default="content")  # "heading" | "content"
     token_count: int = Field(default=0)  # Token 数量
+
+    # pgvector：向量与 chunk 同表，便于 SQL 事务/权限/过滤统一
+    embedding: Optional[List[float]] = Field(
+        default=None,
+        sa_column=Column(Vector(1024), nullable=True),
+    )
 
     # 关系
     file_document: Optional[FileDocument] = Relationship(back_populates="chunks")

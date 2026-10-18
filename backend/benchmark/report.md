@@ -7,15 +7,16 @@
 ### 1.1 真实简历库（4 份 PDF + 9 张 JPG OCR）
 
 - 语料：`data/真实简历/`，13 个文件，入库 **54 chunks**；
+- 向量后端：**PostgreSQL pgvector 0.8.1 + HNSW**（`document_chunks.embedding vector(1024)`）；Chroma 仅保留为回滚/对比；
 - Golden：`backend/benchmark/real_resumes_golden.json`，**42 条**（39 条可评 + 3 条拒答）；
 - 评法：只评检索；`evidence_all@3` 要求 gold evidence 的每条短语都出现在 top3 正文；拒答类不计 Hit@K；
 - 详细逐题报告（含真实姓名/学校，**已 gitignore**）：`backend/benchmark/real_resumes_report.md`。
 
 | 检索模式 | evidence_all@3 | evidence_any@3 | MRR | 平均检索延迟 |
 | :--- | ---: | ---: | ---: | ---: |
-| vector (BGE-M3) | **92.31%** | 97.44% | 0.7479 | 868.6 ms |
-| fulltext (BM25/jieba) | 82.05% | 84.62% | 0.8075 | 131.6 ms |
-| hybrid 0.7/0.3 | 89.74% | 92.31% | 0.7799 | 1021.8 ms |
+| vector (BGE-M3 + pgvector) | **92.31%** | 97.44% | 0.7479 | 632.1 ms |
+| fulltext (BM25/jieba) | 82.05% | 84.62% | 0.8075 | 151.9 ms |
+| hybrid 0.7/0.3 (pgvector) | 89.74% | 92.31% | 0.7799 | 814.2 ms |
 | hybrid 0.8/0.2 | **92.31%** | 94.87% | 0.7274 | 未单独计时 |
 
 - BM25 k1/b 扫描：`evidence_all@3` 均为 82.05%；MRR 最高为 `k1=2.0, b=0.9` 的 0.8465；
@@ -44,7 +45,7 @@
 | hybrid，无 rerank | 2.99 s | 3.56 s | 答案正确，但先提到无关图片 |
 | hybrid + BGE-Reranker-v2-m3 | 3.70 s | 4.15 s | top1 命中张梦洋，答案先给正确信息 |
 
-> 只跑了一条，不能据此写 P95；要写 P95 需跑 ≥20 条并记录分布。
+> 只跑了一条，不能据此写 P95；要写 P95 需跑 ≥20 条并记录分布。TTFT 是 Chroma 时期样本，pgvector 切换后未重跑，不要混用。
 
 ## 2. 尚未完成的评测
 
@@ -57,7 +58,7 @@
 ```bash
 cd /home/yang/Agentic-Multimodal-RAG/backend
 
-# 真实简历检索评测（需要本地 real_resumes_golden.json 与已入库 KB）
+# 真实简历检索评测（需要本地 real_resumes_golden.json 与已入库 KB；默认 pgvector）
 JWT_SECRET="$(python3 -c 'import secrets;print(secrets.token_urlsafe(48))')" \
   python3 benchmark/eval_personal_kb.py \
   --kb-id kb_real_resumes \

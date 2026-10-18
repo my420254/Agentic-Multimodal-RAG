@@ -67,7 +67,7 @@ export const CareerCenter: React.FC<CareerCenterProps> = ({ tab }) => {
 岗位职责：
 1. 负责多智能体协同运行时与 LangGraph 分层状态机编排；
 2. 深度掌握 Python, FastAPI, Redis 缓存击穿治理与分布式锁，具备 1000+ QPS 极限高并发抗压调优经验；
-3. 负责企业级 Hybrid RAG 混合检索管线构建，精通 BM25/GIN 倒排与向量召回融合及重排器调优。
+3. 负责企业级 Hybrid RAG 混合检索管线构建，精通 jieba BM25 关键词召回、pgvector 向量召回融合及重排器调优。
 任职要求：计算机或软件工程相关专业硕士，具有扎实工程落地能力，要求具备死循环熔断与异常降级闭环思维。`
   );
 

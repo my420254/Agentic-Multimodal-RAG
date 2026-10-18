@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+psycopg2://postgres:postgres@localhost:5432/agent_db"
     REDIS_URL: str = "redis://localhost:6379/0"
     CHROMA_DB_DIR: str = "./storage/chroma_db"
+    VECTOR_BACKEND: str = "pgvector"  # pgvector | chroma
+    PGVECTOR_DIM: int = 1024
     UPLOAD_DIR: str = "./storage/uploads"
     IMAGE_DIR: str = "./storage/images"
 

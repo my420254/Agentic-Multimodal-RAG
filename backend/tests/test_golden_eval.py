@@ -10,7 +10,6 @@
 import pytest
 from app.services.job_fraud_detector import job_fraud_detector, FraudRiskLevel
 from app.services.career_matcher import career_matcher_service
-from app.services.graphrag_service import graphrag_service
 
 
 GOLDEN_TEST_CASES = [
@@ -82,14 +81,6 @@ async def test_golden_resume_star_truth_preservation():
             has_truth_marker = True
             break
     assert has_truth_marker, "STAR rewrite violated truth-preservation guardrail: missing metric prompt marker"
-
-
-def test_golden_graphrag_topological_chain():
-    """验证技术依赖图谱能够针对核心技术（如 Redis）生成具备逻辑依赖的多跳追问拓扑链路"""
-    subgraph = graphrag_service.search_subgraph("Redis 高并发与缓存雪崩", max_depth=2)
-    assert len(subgraph.nodes) >= 2
-    assert len(subgraph.traversal_paths) >= 1
-    assert "GraphRAG" in subgraph.graph_context or "Redis" in subgraph.graph_context
 
 
 def test_golden_memory_cross_user_isolation():

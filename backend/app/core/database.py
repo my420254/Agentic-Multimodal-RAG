@@ -4,6 +4,7 @@
 
 from sqlmodel import SQLModel, create_engine, Session
 from sqlalchemy.pool import StaticPool
+from sqlalchemy import text
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -37,8 +38,18 @@ else:
 
 
 def init_db():
-    """初始化数据库表"""
+    """初始化数据库表；PostgreSQL 下确保 pgvector 扩展与 HNSW 索引存在。"""
+    is_pg = "postgresql" in settings.DATABASE_URL or "postgres" in settings.DATABASE_URL
+    if is_pg:
+        with engine.begin() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     SQLModel.metadata.create_all(engine)
+    if is_pg:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_document_chunks_embedding_hnsw "
+                "ON document_chunks USING hnsw (embedding vector_cosine_ops)"
+            ))
 
 
 def get_session():

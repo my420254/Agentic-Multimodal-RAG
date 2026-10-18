@@ -14,7 +14,6 @@ from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 
 from app.services.llm import LLMService
-from app.services.graphrag_service import graphrag_service
 from app.services.prompt_service import prompt_workshop_service
 
 logger = logging.getLogger(__name__)
@@ -60,8 +59,6 @@ class InterviewTurnResponse(BaseModel):
     feedback: Optional[str] = Field(default=None, description="针对学生上一轮回答的优点与不足分析")
     identified_gaps: List[str] = Field(default_factory=list, description="本次追问识别出的技术薄弱点与盲区")
     identified_strengths: List[str] = Field(default_factory=list, description="本次追问识别出的技术亮点与深度体现")
-    graphrag_traversal_path: Optional[str] = Field(default=None, description="GraphRAG 本轮拓扑追问路径")
-    graphrag_active_nodes: List[str] = Field(default_factory=list, description="GraphRAG 本轮关联激活的技术实体")
     recommended_reading: List[str] = Field(default_factory=list, description="技术补强推荐阅读")
 
 
@@ -75,10 +72,6 @@ class MockInterviewService:
 
     def __init__(self, llm_service: Optional[LLMService] = None):
         self.llm = llm_service or LLMService()
-
-    def get_skill_topology(self) -> Dict[str, Any]:
-        """获取 GraphRAG 全图拓扑结构（用于前端可视化雷达或知识图谱渲染）"""
-        return graphrag_service.get_full_graph()
 
     def _determine_stage(self, turn_count: int, is_fallback: bool = False) -> ProbingStage:
         """根据会话轮次与当前状态计算建议考察阶梯"""
@@ -192,8 +185,6 @@ class MockInterviewService:
                     feedback=data.get("feedback", "技术概念阐述准确，若能结合容错与度量指标将更具说服力。"),
                     identified_gaps=gaps,
                     identified_strengths=strengths,
-                    graphrag_traversal_path=None,
-                    graphrag_active_nodes=[],
                     recommended_reading=data.get("recommended_reading", ["《高性能系统架构设计》", "《分布式技术原理与实战》"])
                 )
         except Exception as e:
@@ -213,8 +204,6 @@ class MockInterviewService:
                 feedback="坦诚认知自己的技术边界是成熟工程师的良好素质；建议在复盘中重点强化该组件的高并发进阶机制。",
                 identified_gaps=[f"{current_focus} 进阶故障容错与极端场景治理"],
                 identified_strengths=[],
-                graphrag_traversal_path=None,
-                graphrag_active_nodes=[],
                 recommended_reading=["《技术核心原理深度剖析》", "《高频技术面试高分答题指南》"]
             )
         else:
@@ -230,8 +219,6 @@ class MockInterviewService:
                 feedback="基础原理阐述清晰，若能在后续回答中突出量化压测数据与边界保护机制，会更具竞争力。",
                 identified_gaps=[],
                 identified_strengths=[f"{current_focus} 核心选型与机制理解准确"],
-                graphrag_traversal_path=None,
-                graphrag_active_nodes=[],
                 recommended_reading=["《大模型 RAG 工业级落地实践》", "《高并发系统限流与降级设计》"]
             )
 

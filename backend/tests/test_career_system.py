@@ -87,7 +87,7 @@ async def test_career_matcher_resume_section_parsing():
     1. 基于 MCP 协议构建主从多智能体运行时；
     2. 基于 Kafka 构建异步事件驱动链路，时延缩减至 50ms。
     【核心项目经历】
-    基于多模态与 GraphRAG 的高校求职辅导系统
+    基于多模态 RAG 的高校求职辅导系统
     采用 PostgreSQL GIN + pgvector 进行混合检索，优化 Top-3 召回。
     【学术论文】
     面向长尾情感分析的轻量化微调框架，CCF 会议一作。
@@ -122,12 +122,8 @@ async def test_career_matcher_bidirectional_matching():
 
 
 @pytest.mark.asyncio
-async def test_mock_interview_and_topology():
-    """测试 GraphRAG 技能图谱拓扑与模拟面试追问"""
-    topo = mock_interview_service.get_skill_topology()
-    assert len(topo["nodes"]) >= 5
-    assert len(topo["edges"]) >= 3
-
+async def test_mock_interview_probing():
+    """测试模拟面试追问"""
     # 测试模拟面试对话
     messages = [
         {"role": "user", "content": "面试官您好，我之前在实习中用 Redis 和 Lua 脚本做过滑动窗口限流。"}
@@ -144,8 +140,8 @@ async def test_mock_interview_and_topology():
     assert "追问" in res.reply_text or "深入" in res.reply_text or len(res.reply_text) > 20
 
 
-def test_sliding_window_rate_limiter_1000_qps():
-    """测试 1000+ QPS 滑动窗口限流器吞吐与限制保护"""
+def test_sliding_window_rate_limiter_limit():
+    """测试滑动窗口限流器的阈值保护（不是 1000 QPS 压测）"""
     limiter = SlidingWindowRateLimiter(limit=10, window_seconds=0.5)
     passed_count = 0
     for _ in range(15):
@@ -186,13 +182,7 @@ def test_career_api_endpoints(client, auth_headers):
     assert match_data["overall_match_score"] > 0
     assert "radar_chart" in match_data
 
-    # 3. 技能图谱接口
-    graph_resp = client.get("/api/v1/career/skill-graph", headers=auth_headers)
-    assert graph_resp.status_code == 200
-    graph_data = graph_resp.json()
-    assert len(graph_data["nodes"]) > 0
-
-    # 4. 面试对话接口
+    # 3. 面试对话接口
     interview_resp = client.post(
         "/api/v1/career/interview/chat",
         json={
@@ -205,33 +195,13 @@ def test_career_api_endpoints(client, auth_headers):
     assert interview_resp.status_code == 200
     turn_data = interview_resp.json()
     assert turn_data["role"] == "interviewer"
-    assert "graphrag_traversal_path" in turn_data
 
-    # 5. 提示词工坊接口
+    # 4. 提示词工坊接口
     prompts_resp = client.get("/api/v1/career/prompts", headers=auth_headers)
     assert prompts_resp.status_code == 200
     prompts_data = prompts_resp.json()
     assert "mock_interviewer" in prompts_data
     assert "resume_doctor" in prompts_data
-
-    # 6. GraphRAG 子图多跳检索接口
-    subgraph_resp = client.get(
-        "/api/v1/career/graphrag/subgraph?query=redis",
-        headers=auth_headers,
-    )
-    assert subgraph_resp.status_code == 200
-    subgraph_data = subgraph_resp.json()
-    assert len(subgraph_data["nodes"]) > 0
-    assert "graph_context" in subgraph_data
-
-
-def test_graphrag_subgraph_traversal():
-    """测试 GraphRAG 子图检索与拓扑链生成"""
-    from app.services.graphrag_service import graphrag_service
-    subgraph = graphrag_service.search_subgraph("FastAPI 异步限流与压测", max_depth=2)
-    assert len(subgraph.nodes) >= 2
-    assert len(subgraph.traversal_paths) >= 1
-    assert "【GraphRAG 技能拓扑与核心考点上下文】" in subgraph.graph_context
 
 
 def test_prompt_workshop_custom_update():

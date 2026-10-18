@@ -12,6 +12,7 @@ dependencies = [
     "python-multipart>=0.0.6",
     "aiofiles>=23.2.1",
     "chromadb>=0.4.22",
+    "pgvector>=0.3.0",
     "langchain>=0.1.0",
     "langchain-community>=0.0.13",
     "langchain-core>=0.1.0",
