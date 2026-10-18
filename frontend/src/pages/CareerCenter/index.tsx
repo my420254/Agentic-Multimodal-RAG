@@ -39,9 +39,11 @@ import {
   ExclamationCircleOutlined,
   UndoOutlined,
   SaveOutlined,
+  ReloadOutlined,
   RadarChartOutlined
 } from '@ant-design/icons';
 import { authFetch } from '@/services/auth';
+import { getFileList, getFileText, getKnowledgeBaseList } from '@/services';
 
 const { TextArea } = Input;
 const { Title, Text, Paragraph } = Typography;
@@ -58,19 +60,7 @@ export const CareerCenter: React.FC<CareerCenterProps> = ({ tab }) => {
   }, [tab]);
 
   // ==================== 1. 简历严谨诊断与 STAR 优化 ====================
-  const [resumeText, setResumeText] = useState(
-    `张梦洋 | 辽宁大学软件工程（NLP）硕士 (2024.09 - 2027.06)
-【专业技能】
-熟练掌握 Python, FastAPI, Go, Docker, Redis, Kafka, LangGraph 状态机, PostgreSQL + pgvector, Hybrid RAG 混合检索与 BGE-Reranker。
-【实习经历】
-广州省心购科技 - 大模型智能体研发实习生 (2026.07 - 2026.10)
-- 基于 MCP 协议与事件总线构建主从多智能体运行时；
-- 负责端云异步事件驱动链路与三级记忆架构。
-【核心项目经历】
-基于多模态与 GraphRAG 的高校智能求职面试辅导 Agent 平台 (辽宁大学重点实验室)
-- 采用 PostgreSQL GIN 倒排 + pgvector 双路统一召回，提高检索准确度；
-- 基于 Redis 7 ZSet + Lua 脚本实现滑动窗口限流，优化高并发响应。`
-  );
+  const [resumeText, setResumeText] = useState('');
 
   const [jdText, setJdText] = useState(
     `【一线大厂 · 大模型智能体与高并发后端架构师】
@@ -80,6 +70,57 @@ export const CareerCenter: React.FC<CareerCenterProps> = ({ tab }) => {
 3. 负责企业级 Hybrid RAG 混合检索管线构建，精通 BM25/GIN 倒排与向量召回融合及重排器调优。
 任职要求：计算机或软件工程相关专业硕士，具有扎实工程落地能力，要求具备死循环熔断与异常降级闭环思维。`
   );
+
+  const [resumeFiles, setResumeFiles] = useState<Array<{ id: string; name: string; chunks: number }>>([]);
+  const [selectedResumeId, setSelectedResumeId] = useState('');
+  const [resumeMeta, setResumeMeta] = useState<{ name: string; chars: number; chunks: number } | null>(null);
+  const [resumeLoading, setResumeLoading] = useState(false);
+
+  const loadResumeText = async (fileId: string) => {
+    setResumeLoading(true);
+    try {
+      const res = await getFileText(fileId);
+      const data = (res as any).data;
+      setResumeText(data.text || '');
+      setSelectedResumeId(fileId);
+      setResumeMeta({ name: data.name, chars: data.char_count, chunks: data.chunk_count });
+    } catch (err) {
+      console.error('加载完整简历失败', err);
+      message.error('加载完整简历失败，可手动粘贴');
+    } finally {
+      setResumeLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const initRealResumes = async () => {
+      try {
+        const kbRes = await getKnowledgeBaseList();
+        const kbs = Array.isArray(kbRes) ? kbRes : (kbRes as any).data || [];
+        const kb = kbs.find((item: any) => item.id === 'kb_real_resumes')
+          || kbs.find((item: any) => String(item.name || '').includes('真实简历'));
+        if (!kb) return;
+        const fileRes = await getFileList(kb.id);
+        const files = Array.isArray(fileRes) ? fileRes : (fileRes as any).data || [];
+        const pdfs = files.filter((f: any) => String(f.name || '').toLowerCase().endsWith('.pdf'));
+        const list = (pdfs.length ? pdfs : files).map((f: any) => ({
+          id: f.id,
+          name: f.name,
+          chunks: f.chunk_count ?? f.chunkCount ?? 0,
+        }));
+        if (cancelled) return;
+        setResumeFiles(list);
+        if (list.length > 0) {
+          await loadResumeText(list[0].id);
+        }
+      } catch (err) {
+        console.error('初始化真实简历失败', err);
+      }
+    };
+    initRealResumes();
+    return () => { cancelled = true; };
+  }, []);
 
   const [matchLoading, setMatchLoading] = useState(false);
   const [matchResult, setMatchResult] = useState<any>(null);
@@ -227,7 +268,7 @@ export const CareerCenter: React.FC<CareerCenterProps> = ({ tab }) => {
   };
 
   return (
-    <div style={{ padding: '24px', maxWidth: '1400px', margin: '0 auto' }}>
+    <div style={{ padding: '24px', maxWidth: '1700px', margin: '0 auto' }}>
       <div style={{ marginBottom: '20px' }}>
         <Space direction="vertical" size={2}>
           <Title level={3} style={{ margin: 0 }}>
@@ -262,24 +303,68 @@ export const CareerCenter: React.FC<CareerCenterProps> = ({ tab }) => {
                   style={{ marginBottom: 16 }}
                 />
 
+                <Alert
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 12 }}
+                  message="这里加载的是整篇简历原文，不是 RAG 检索片段"
+                  description="简历诊断需要完整上下文，因此系统从你上传的真实简历中按 chunk 顺序还原全文；模拟面试和知识库问答才会按 chunk 检索。"
+                />
+
                 <Row gutter={20}>
-                  <Col span={12}>
-                    <Card title="📄 学生简历多模态文本 (教育背景/项目经历/技能列表)" size="small">
-                      <TextArea
-                        rows={10}
-                        value={resumeText}
-                        onChange={e => setResumeText(e.target.value)}
-                        placeholder="粘贴学生简历内容..."
-                      />
+                  <Col xs={24} xl={14}>
+                    <Card
+                      title={
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                          <span>📄 学生简历 · 完整原文</span>
+                          <Space wrap>
+                            <Select
+                              value={selectedResumeId || undefined}
+                              onChange={(value) => loadResumeText(value)}
+                              options={resumeFiles.map((f) => ({ value: f.id, label: `${f.name}（${f.chunks} chunks）` }))}
+                              placeholder="选择真实简历"
+                              style={{ width: 320 }}
+                              showSearch
+                              optionFilterProp="label"
+                              loading={resumeLoading}
+                            />
+                            <Button
+                              size="small"
+                              icon={<ReloadOutlined />}
+                              onClick={() => selectedResumeId && loadResumeText(selectedResumeId)}
+                              loading={resumeLoading}
+                            >
+                              重新加载
+                            </Button>
+                          </Space>
+                        </div>
+                      }
+                      size="small"
+                    >
+                      {resumeMeta && (
+                        <Text type="secondary">
+                          已加载 {resumeMeta.name} · {resumeMeta.chars} 字 · {resumeMeta.chunks} 个 chunk
+                        </Text>
+                      )}
+                      <Spin spinning={resumeLoading}>
+                        <TextArea
+                          rows={26}
+                          value={resumeText}
+                          onChange={e => setResumeText(e.target.value)}
+                          placeholder="未自动加载到简历；可在此粘贴完整简历..."
+                          style={{ minHeight: 560, marginTop: 8, fontFamily: 'Consolas, monospace', fontSize: 13, lineHeight: 1.7 }}
+                        />
+                      </Spin>
                     </Card>
                   </Col>
-                  <Col span={12}>
+                  <Col xs={24} xl={10}>
                     <Card title="🎯 目标企业岗位 JD (任职要求/硬性门槛)" size="small">
                       <TextArea
-                        rows={10}
+                        rows={26}
                         value={jdText}
                         onChange={e => setJdText(e.target.value)}
                         placeholder="粘贴目标岗位招聘要求..."
+                        style={{ minHeight: 560, marginTop: 8, fontFamily: 'Consolas, monospace', fontSize: 13, lineHeight: 1.7 }}
                       />
                     </Card>
                   </Col>

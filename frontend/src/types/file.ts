@@ -66,3 +66,12 @@ export interface ChunkListResponse {
   items: ChunkInfo[];
   total: number;
 }
+
+/** 文件全文响应（由 chunks 拼接，供简历诊断整篇使用） */
+export interface FileTextResponse {
+  file_id: string;
+  name: string;
+  text: string;
+  char_count: number;
+  chunk_count: number;
+}

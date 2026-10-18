@@ -6,6 +6,7 @@ import request from './request';
 import type {
   FileInfo,
   FileUploadResponse,
+  FileTextResponse,
   ChunkInfo,
   ChunkListResponse,
   UpdateChunkRequest,
@@ -47,6 +48,11 @@ export const getFileDetail = (fileId: string): Promise<ApiResponse<FileInfo>> =>
 /** 删除文件 */
 export const deleteFile = (fileId: string): Promise<ApiResponse<void>> => {
   return request.delete(`/files/${fileId}`);
+};
+
+/** 获取文件完整文本（chunks 拼接，供简历诊断整篇使用） */
+export const getFileText = (fileId: string): Promise<ApiResponse<FileTextResponse>> => {
+  return request.get(`/files/${fileId}/text`);
 };
 
 /** 获取文件的 Chunks */

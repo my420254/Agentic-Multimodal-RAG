@@ -15,7 +15,7 @@ from app.core.deps import get_current_user
 from app.core.access import get_visible_chunk, get_visible_file, get_visible_kb
 from app.core.config import get_settings
 from app.models import KnowledgeBase, FileDocument, FileStatus, generate_uuid, DocumentChunk, User
-from app.schemas import FileUploadResponse, FileStatusResponse, ApiResponse
+from app.schemas import FileUploadResponse, FileStatusResponse, FileTextResponse, ApiResponse
 from app.tasks.parse_tasks import process_file_parsing
 
 router = APIRouter(tags=["File"], dependencies=[Depends(get_current_user)])
@@ -178,6 +178,54 @@ async def get_file_detail(
             error_message=file_doc.error_message,
             chunk_count=chunk_count,
             created_at=file_doc.created_at,
+        )
+    )
+
+
+def _join_chunks_without_overlap(contents: list[str]) -> str:
+    """按 chunk 顺序拼回全文，并去掉相邻 chunk 的 overlap，避免重复段落。"""
+    full = ""
+    for raw in contents:
+        text = (raw or "").strip()
+        if not text:
+            continue
+        if full:
+            max_n = min(200, len(full), len(text))
+            overlap = 0
+            for n in range(max_n, 0, -1):
+                if full.endswith(text[:n]):
+                    overlap = n
+                    break
+            text = text[overlap:]
+        if not text:
+            continue
+        if full and not full.endswith("\n"):
+            full += "\n"
+        full += text
+    return full
+
+
+@router.get("/files/{file_id}/text", response_model=ApiResponse[FileTextResponse])
+async def get_file_full_text(
+    file_id: str,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """返回文件的完整文本（chunks 按 original_index 拼接，自动去 overlap）。"""
+    file_doc = get_visible_file(session, file_id, current_user)
+    chunks = session.exec(
+        select(DocumentChunk)
+        .where(DocumentChunk.file_id == file_id)
+        .order_by(DocumentChunk.original_index)
+    ).all()
+    text = _join_chunks_without_overlap([c.content for c in chunks])
+    return ApiResponse(
+        data=FileTextResponse(
+            file_id=file_doc.id,
+            name=file_doc.name,
+            text=text,
+            char_count=len(text),
+            chunk_count=len(chunks),
         )
     )
 

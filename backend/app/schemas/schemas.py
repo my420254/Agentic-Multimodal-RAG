@@ -97,6 +97,15 @@ class FileStatusResponse(BaseModel):
         from_attributes = True
 
 
+class FileTextResponse(BaseModel):
+    """文件全文响应（由 chunks 按顺序拼接，供简历诊断等整篇场景使用）"""
+    file_id: str
+    name: str
+    text: str
+    char_count: int
+    chunk_count: int
+
+
 # ==================== Chunk ====================
 
 class ContentTypeEnum(str, Enum):
