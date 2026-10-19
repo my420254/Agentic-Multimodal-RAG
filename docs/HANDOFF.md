@@ -1,5 +1,10 @@
 # 交接说明（给 WSL 内的执行 Agent）
 
+> **⚠️ 2026-10-19 更新：本文是 W1 鉴权时期的历史任务书，鉴权/隔离早已完成。**  
+> **当前项目状态、运行手册、Langfuse 迁移方案请看 [`docs/PROJECT_STATUS_REPORT.md`](PROJECT_STATUS_REPORT.md)。不要按本文从“加鉴权”开始做。**
+
+
+
 > 你是接手本项目的工程师 Agent。仓库：`/home/yang/Agentic-Multimodal-RAG`。
 > 本文档是**操作手册**，不是背景介绍。读完本文 + `docs/PRD.md` 的相关章节即可开工。
 > 一次只推进一个 commit，每个 commit 跑完验证再进下一个，不要一口气改完。
