@@ -18,10 +18,11 @@ from sqlmodel import Session, func, select
 from app.core.database import get_session
 from app.core.deps import get_current_admin
 from app.core.security import hash_password
-from app.models import ApiKey, AuditLog, CustomModel, KnowledgeBase, ModelType, RequestLog, SystemPrompt, User
+from app.models import AgentTrace, ApiKey, AuditLog, CustomModel, KnowledgeBase, ModelType, RequestLog, SystemPrompt, User
 from app.services.audit_service import record_audit
 from app.services.prompt_service import prompt_workshop_service
 from app.services.system_prompt_service import system_prompt_service
+from app.services.trace_service import trace_to_dict
 
 router = APIRouter(
     prefix="/admin",
@@ -587,6 +588,44 @@ async def list_request_logs(
     }
 
 
+@router.get("/traces")
+async def list_agent_traces(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    mode: Optional[str] = Query(default=None),
+    admin: User = Depends(get_current_admin),
+    session: Session = Depends(get_session),
+):
+    stmt = select(AgentTrace)
+    count_stmt = select(func.count()).select_from(AgentTrace)
+    if mode:
+        stmt = stmt.where(AgentTrace.mode == mode)
+        count_stmt = count_stmt.where(AgentTrace.mode == mode)
+    total = int(session.exec(count_stmt).one())
+    rows = session.exec(
+        stmt.order_by(AgentTrace.created_at.desc())
+        .offset((page - 1) * page_size).limit(page_size)
+    ).all()
+    return {
+        "items": [trace_to_dict(row, detail=False) for row in rows],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@router.get("/traces/{trace_id}")
+async def get_agent_trace(
+    trace_id: str,
+    admin: User = Depends(get_current_admin),
+    session: Session = Depends(get_session),
+):
+    row = session.exec(select(AgentTrace).where(AgentTrace.trace_id == trace_id)).first()
+    if not row:
+        raise HTTPException(status_code=404, detail={"code": 40401, "message": "trace 不存在"})
+    return trace_to_dict(row, detail=True)
+
+
 @router.get("/observability/summary")
 async def observability_summary(
     admin: User = Depends(get_current_admin),
@@ -609,6 +648,7 @@ async def observability_summary(
         "error_rate": round(errors / total, 4) if total else 0.0,
         "avg_latency_ms": round(float(avg_latency), 2) if avg_latency is not None else 0.0,
         "top_paths": [{"path": p, "count": int(c)} for p, c in top_rows],
+        "trace_count": int(session.exec(select(func.count()).select_from(AgentTrace)).one()),
         "metrics_endpoint": "/metrics",
     }
 

@@ -27,6 +27,7 @@ const Admin: React.FC = () => {
   const [audits, setAudits] = useState<any[]>([]);
   const [obs, setObs] = useState<any>({});
   const [requestLogs, setRequestLogs] = useState<any[]>([]);
+  const [traces, setTraces] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
   const [userOpen, setUserOpen] = useState(false);
@@ -50,7 +51,7 @@ const Admin: React.FC = () => {
   const load = async () => {
     setLoading(true);
     try {
-      const [o, u, k, m, p, a, s, rl] = await Promise.all([
+      const [o, u, k, m, p, a, s, rl, tr] = await Promise.all([
         api.getAdminOverview(),
         api.getAdminUsers({ page: 1, page_size: 100 }),
         api.getAdminApiKeys({ page: 1, page_size: 100 }),
@@ -59,10 +60,11 @@ const Admin: React.FC = () => {
         api.getAdminAuditLogs({ page: 1, page_size: 50 }),
         api.getAdminObservabilitySummary(),
         api.getAdminRequestLogs({ page: 1, page_size: 50 }),
+        api.getAdminTraces({ page: 1, page_size: 50 }),
       ]);
       setOverview(o || {}); setUsers(u?.items || []); setKeys(k?.items || []);
       setModels(m?.items || []); setPrompts(p?.items || []); setAudits(a?.items || []);
-      setObs(s || {}); setRequestLogs(rl?.items || []);
+      setObs(s || {}); setRequestLogs(rl?.items || []); setTraces(tr?.items || []);
     } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
@@ -191,6 +193,15 @@ const Admin: React.FC = () => {
     { title: '耗时', dataIndex: 'duration_ms', render: (v: number) => `${Number(v || 0).toFixed(1)} ms` },
     { title: '用户', dataIndex: 'user_id', ellipsis: true, render: (v: string) => v || '-' },
   ];
+  const traceCols = [
+    { title: '时间', dataIndex: 'created_at', render: fmt },
+    { title: 'Trace ID', dataIndex: 'trace_id', render: (v: string) => <Text code>{v}</Text> },
+    { title: '模式', dataIndex: 'mode', render: (v: string) => <Tag>{v}</Tag> },
+    { title: 'Query', dataIndex: 'query', ellipsis: true },
+    { title: 'TTFT', dataIndex: 'ttft_ms', render: (v: number) => v == null ? '-' : `${Number(v).toFixed(0)} ms` },
+    { title: '总耗时', dataIndex: 'total_ms', render: (v: number) => `${Number(v || 0).toFixed(0)} ms` },
+    { title: '错误', dataIndex: 'error', ellipsis: true, render: (v: string) => v ? <Tag color="red">error</Tag> : <Tag color="green">ok</Tag> },
+  ];
   const auditCols = [
     { title: '时间', dataIndex: 'created_at', render: fmt },
     { title: '操作', dataIndex: 'action', render: (v: string) => <Text code>{v}</Text> },
@@ -259,6 +270,9 @@ const Admin: React.FC = () => {
                 <Text type="secondary">Prometheus 文本指标；请求日志不含 query/response 正文。</Text>
               </Space>
               <Table rowKey="id" size="small" columns={requestCols} dataSource={requestLogs} pagination={false} />
+              <Title level={5} style={{ marginTop: 16 }}>Agent Trace（query/answer 预览，仅 admin）</Title>
+              <Text type="secondary">trace_id 由 /chat/completions 生成，记录 TTFT、总耗时、引用、工具步骤与错误。</Text>
+              <Table rowKey="trace_id" size="small" columns={traceCols} dataSource={traces} pagination={false} style={{ marginTop: 8 }} />
             </div>
           ) },
         ]} />

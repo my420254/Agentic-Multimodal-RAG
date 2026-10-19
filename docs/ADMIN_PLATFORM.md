@@ -34,7 +34,7 @@ Dify/FastGPT/RAGFlow 是“另一个产品”，不是后台；Langfuse/LangSmit
 - 系统提示词：版本化、草稿、发布/归档、回滚；优先级 `用户覆盖 > 全局 active > 代码默认`；
 - 审计：`audit_logs`，记录用户/Key/模型/提示词写操作；
 - 建表/账号脚本：`scripts/seed_admin.py`；
-- 测试：`backend/tests/test_admin_api.py`，全量 **85 passed**（2026-10-19）。
+- 测试：`backend/tests/test_admin_api.py` + `test_admin_traces.py`，全量 **92 passed**（2026-10-19）。
 
 **P1-lite 观测已落地：**
 
@@ -43,9 +43,16 @@ Dify/FastGPT/RAGFlow 是“另一个产品”，不是后台；Langfuse/LangSmit
 - `/admin` → “观测”标签：请求总数、错误率、平均耗时、最近请求；
 - 请求日志可在测试环境用 `REQUEST_LOG_ENABLED=false` 关闭。
 
+**P1-lite 本地 Agent trace 已落地：**
+
+- `agent_traces`：`trace_id`、user/session、mode、query、answer_preview、citations、steps、tool_calls、TTFT、total_ms、error；
+- `/api/v1/chat/completions` 响应头带 `X-Trace-Id`，`done` 事件带 `trace_id`；
+- Admin `GET /admin/traces`、`GET /admin/traces/{trace_id}`，前端“观测”页可看最近 trace；
+- 仅 admin 可查；query/answer 只存预览，避免把完整简历正文复制进日志。
+
 **尚未实现（P1 完整版/P2，不要对外说已完成）：**
 
-- Langfuse/Phoenix trace、bad case 工作台；
+- Langfuse/Phoenix 外部 trace、bad case 工作台；本地 trace 不是 Langfuse；
 - Grafana 看板/告警；
 - Locust 压测；
 - 线上 A/B 实验与 assignment；

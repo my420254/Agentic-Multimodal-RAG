@@ -120,3 +120,11 @@ python3 benchmark/interview_grounding_eval.py
 - 工具超时 20s，瞬时错误最多重试 1 次；
 - 错误分类：`validation_error` / `timeout` / `execution_error`，回传给 Agent 作为 `tool_error` step；
 - 5 条工具治理单测：未知参数、空 query、越界 top_k、超时、瞬时重试。
+
+## 1.8 Agent Trace 与后台可观测（2026-10-19）
+
+- `/chat/completions` 生成 `X-Trace-Id`，`done` 事件带 `trace_id`；
+- 落 `agent_traces`：query/answer_preview、citations、steps、tool_calls、TTFT、total_ms、error；
+- Admin `GET /admin/traces` 列表与详情，前端“观测”页展示；
+- 实测：一次 Agent 请求 `trace_id=tr_671a...`，TTFT 5457ms、total 8366ms，citations 3；Admin 可查；
+- 说明：这是本地 trace，不是 Langfuse；Langfuse/Phoenix 外部后端仍未接。

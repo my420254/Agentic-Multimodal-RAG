@@ -319,6 +319,31 @@ class AuditLog(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now, index=True)
 
 
+class AgentTrace(SQLModel, table=True):
+    """请求级 Agent trace：query/answer 预览、检索引用、工具步骤、耗时。仅 admin 可查。"""
+
+    __tablename__ = "agent_traces"
+
+    id: str = Field(default_factory=generate_uuid, primary_key=True)
+    trace_id: str = Field(index=True, unique=True, max_length=64)
+    user_id: Optional[str] = Field(default=None, index=True, max_length=64)
+    session_id: Optional[str] = Field(default=None, max_length=128)
+    endpoint: str = Field(default="/api/v1/chat/completions", max_length=128)
+    mode: str = Field(default="chat", max_length=32)
+    query: str = Field(default="")
+    answer_preview: str = Field(default="")
+    kb_ids: str = Field(default="")
+    model_id: Optional[str] = Field(default=None, max_length=128)
+    prompt_version: Optional[str] = Field(default=None, max_length=64)
+    citations_json: str = Field(default="[]")
+    steps_json: str = Field(default="[]")
+    tool_calls_json: str = Field(default="[]")
+    ttft_ms: Optional[float] = Field(default=None)
+    total_ms: float = Field(default=0.0)
+    error: Optional[str] = Field(default=None)
+    created_at: datetime = Field(default_factory=utc_now, index=True)
+
+
 class RequestLog(SQLModel, table=True):
     """HTTP 请求日志（轻量观测；不含 query/response 正文，避免 PII）"""
 

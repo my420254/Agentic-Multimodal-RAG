@@ -22,6 +22,7 @@ from app.models.models import (
     SystemPrompt,
     AuditLog,
     RequestLog,
+    AgentTrace,
 )
 
 __all__ = [
@@ -44,4 +45,5 @@ __all__ = [
     "SystemPrompt",
     "AuditLog",
     "RequestLog",
+    "AgentTrace",
 ]

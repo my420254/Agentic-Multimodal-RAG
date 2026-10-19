@@ -60,3 +60,9 @@ export const getAdminObservabilitySummary = (): Promise<any> =>
 
 export const getAdminAuditLogs = (params?: Record<string, any>): Promise<any> =>
   request.get('/admin/audit-logs', { params });
+
+export const getAdminTraces = (params?: Record<string, any>): Promise<any> =>
+  request.get('/admin/traces', { params });
+
+export const getAdminTrace = (traceId: string): Promise<any> =>
+  request.get(`/admin/traces/${traceId}`);
