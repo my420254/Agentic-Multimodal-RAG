@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     CHROMA_DB_DIR: str = "./storage/chroma_db"
     VECTOR_BACKEND: str = "pgvector"  # pgvector | chroma
     REQUEST_LOG_ENABLED: bool = True  # 写 request_logs（测试环境关闭）
+    TOOL_TIMEOUT_SECONDS: float = 20.0
+    TOOL_MAX_RETRIES: int = 1
     PGVECTOR_DIM: int = 1024
     UPLOAD_DIR: str = "./storage/uploads"
     IMAGE_DIR: str = "./storage/images"

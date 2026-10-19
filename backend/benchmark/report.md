@@ -105,3 +105,18 @@ python3 benchmark/interview_grounding_eval.py
   - 临时 KB 已清理。
 
 > 这个用例只验证链路，不验证真实简历内容；真实简历 grounding 见 1.5 的 10 条用例。
+
+## 1.7 Agent 模式评测与工具治理（2026-10-19）
+
+- 脚本：`backend/benchmark/agent_eval.py`；
+- 10 条 SRE 知识库问题，走完整 Agent 循环（意图 → 工具 → observation → grading → 最终回答）；
+- 结果：**10/10** 答案关键词命中、citations 非空、无工具错误；
+- 单条耗时约 **6.6–18.5s**（单次样本，不是 P95）；
+- 修复了一个真实 bug：检索 3 次仍不足时，原图直接 END，answer 为空；现在 grading 会路由到 `generate_answer`，基于现有上下文回答并明确说明不足。
+
+工具治理：
+
+- `SearchKnowledgeBaseInput` Pydantic schema：`extra=forbid`，query 1–500 字，top_k 1–20，权重 0–1；
+- 工具超时 20s，瞬时错误最多重试 1 次；
+- 错误分类：`validation_error` / `timeout` / `execution_error`，回传给 Agent 作为 `tool_error` step；
+- 5 条工具治理单测：未知参数、空 query、越界 top_k、超时、瞬时重试。

@@ -181,7 +181,7 @@ class ChatService:
                 if kind == "on_chat_model_stream":
                     # 过滤掉 intent_analysis 和 grading 的输出
                     node_name = event.get("metadata", {}).get("langgraph_node")
-                    if node_name in ["agent", "generate_chat"]:
+                    if node_name in ["agent", "generate_chat", "generate_answer"]:
                          chunk = data["chunk"]
                          if chunk.content:
                              yield ("answer_chunk", {"content": chunk.content})
@@ -189,7 +189,7 @@ class ChatService:
                 # 2. 处理节点状态更新 (Steps & Citations)
                 elif kind == "on_chain_end":
                     node_name = event.get("metadata", {}).get("langgraph_node")
-                    if node_name in ["intent_analysis", "agent", "process_tool_output", "grading", "generate_chat"]:
+                    if node_name in ["intent_analysis", "agent", "process_tool_output", "grading", "generate_answer", "generate_chat"]:
                         outputs = data["output"]
                         if isinstance(outputs, dict):
                             # 发送步骤
@@ -622,7 +622,7 @@ class ChatService:
                     node_name = event.get("metadata", {}).get("langgraph_node")
                     
                     # 只有 agent 或 generate_chat 节点的 LLM 输出才是给用户的回答
-                    if node_name in ["agent", "generate_chat"]:
+                    if node_name in ["agent", "generate_chat", "generate_answer"]:
                         chunk = data.get("chunk")
                         if chunk and chunk.content:
                             yield ("answer_chunk", {"content": chunk.content})
@@ -645,7 +645,7 @@ class ChatService:
                         
                             # NEW: 如果没有流式输出过 (streaming=False)，在这里发送完整内容
                             # 仅针对 agent 和 generate_chat 节点
-                            if node_name in ["agent", "generate_chat"]:
+                            if node_name in ["agent", "generate_chat", "generate_answer"]:
                                 # 检查是否已经流式输出过 (通过判断是否有 chunk 发送)
                                 # 注意：如果是流式模式，on_chat_model_stream 应该已经发送了 answer_chunk
                                 # 但为了保险起见，我们可以检查 has_streamed 标记

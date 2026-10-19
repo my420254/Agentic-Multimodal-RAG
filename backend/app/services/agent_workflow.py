@@ -14,6 +14,13 @@ from langgraph.graph.message import add_messages
 
 from app.services.llm import LLMService
 from app.tools import search_knowledge_base
+from app.tools.governance import (
+    ToolExecutionError,
+    ToolTimeoutError,
+    ToolValidationError,
+    error_payload,
+    execute_with_governance,
+)
 
 # 定义状态
 class AgentState(TypedDict):
@@ -58,6 +65,7 @@ class AgentWorkflow:
         workflow.add_node("tools", self.run_tools)
         workflow.add_node("process_tool_output", self.process_tool_output) # Observation
         workflow.add_node("grading", self.grade_documents) # Scoring
+        workflow.add_node("generate_answer", self.generate_answer) # RAG final answer
         workflow.add_node("generate_chat", self.generate_chat)
         
         # 设置入口
@@ -73,13 +81,14 @@ class AgentWorkflow:
             }
         )
         
-        # 添加条件边: Agent -> (Tools or End)
+        # 添加条件边: Agent -> (Tools or End/Answer)
         workflow.add_conditional_edges(
             "agent",
             self.should_continue,
             {
                 "continue": "tools",
-                "end": END
+                "end": END,
+                "answer": "generate_answer",
             }
         )
         
@@ -89,9 +98,17 @@ class AgentWorkflow:
         # Process Output -> Grading
         workflow.add_edge("process_tool_output", "grading")
         
-        # Grading -> Agent (Loop back)
-        workflow.add_edge("grading", "agent")
+        # Grading -> Agent (retry) or final answer (sufficient / retry exhausted)
+        workflow.add_conditional_edges(
+            "grading",
+            self.route_after_grading,
+            {
+                "retry": "agent",
+                "answer": "generate_answer",
+            }
+        )
         
+        workflow.add_edge("generate_answer", END)
         workflow.add_edge("generate_chat", END)
         
         self.app = workflow.compile()
@@ -252,6 +269,7 @@ Output ONLY one word: "chat" or "qa".
             return {}
             
         tool_outputs = []
+        tool_steps = []
         for tool_call in last_message.tool_calls:
             if tool_call["name"] == "search_knowledge_base":
                 # Agent 生成的参数
@@ -310,11 +328,26 @@ Output ONLY one word: "chat" or "qa".
                         continue
                     final_args[k] = v
                 
-                # Execute tool
+                # Execute tool: 参数校验 + 超时 + 有限重试
                 try:
-                    result = await search_knowledge_base.ainvoke(final_args, config=config)
+                    result = await execute_with_governance(
+                        tool_call["name"],
+                        search_knowledge_base,
+                        final_args,
+                        config=config,
+                    )
+                except ToolValidationError as e:
+                    result = error_payload("validation_error", str(e), retryable=False)
+                    tool_steps.append({"step": "tool_error", "content": f"参数校验失败: {e}"})
+                except ToolTimeoutError as e:
+                    result = error_payload("timeout", str(e), retryable=True)
+                    tool_steps.append({"step": "tool_error", "content": f"工具超时: {e}"})
+                except ToolExecutionError as e:
+                    result = error_payload("execution_error", str(e), retryable=True)
+                    tool_steps.append({"step": "tool_error", "content": f"工具执行失败: {e}"})
                 except Exception as e:
-                    result = json.dumps({"error": str(e), "context": "", "citations": []})
+                    result = error_payload("unknown_error", str(e), retryable=False)
+                    tool_steps.append({"step": "tool_error", "content": f"工具未知错误: {e}"})
                 
                 tool_outputs.append(
                     ToolMessage(
@@ -334,7 +367,19 @@ Output ONLY one word: "chat" or "qa".
         if current_sig:
             new_history.append(current_sig)
 
-        return {"messages": tool_outputs, "execution_history": new_history}
+        return {
+            "messages": tool_outputs,
+            "execution_history": new_history,
+            "agent_steps": tool_steps,
+        }
+
+    def route_after_grading(self, state: AgentState):
+        """检索充分或重试耗尽后，必须进入最终回答节点，避免空 answer。"""
+        if state.get("retry_count", 0) >= 3:
+            return "answer"
+        if float(state.get("last_score") or 0.0) >= 0.75:
+            return "answer"
+        return "retry"
 
     def should_continue(self, state: AgentState):
         """决定是继续调用工具还是结束 (带死循环检测与步数熔断)"""
@@ -342,9 +387,9 @@ Output ONLY one word: "chat" or "qa".
         last_message = messages[-1]
         retry_count = state.get("retry_count", 0)
         
-        # 1. 达到最大重试或步数上限 (熔断保护)
+        # 1. 达到最大重试：进入最终回答，而不是空结束
         if retry_count >= 3:
-            return "end"
+            return "answer"
         
         # 2. 如果没有 tool_calls，结束
         if not hasattr(last_message, "tool_calls") or not last_message.tool_calls:
@@ -509,6 +554,34 @@ Output ONLY one word: "chat" or "qa".
             }
         
         return {"last_score": score, "agent_steps": steps}
+
+    async def generate_answer(self, state: AgentState, config: RunnableConfig):
+        """基于现有检索上下文生成最终回答；不足时明确说明。"""
+        query = state.get("original_query", "")
+        context = state.get("rag_context", "") or "（本轮没有检索到可用上下文）"
+        citations = state.get("citations", []) or []
+        names = []
+        for c in citations[:6]:
+            name = c.get("fileName") or c.get("file_name") or c.get("kb_name")
+            if name and name not in names:
+                names.append(str(name))
+        source_hint = "、".join(names) if names else "无"
+        system_prompt = f"""你是一个严谨的知识库问答助手。
+规则：
+1. 只基于下面提供的检索上下文回答，不要编造上下文之外的事实；
+2. 如果上下文不足，明确说“现有资料不足以完整回答”，并说明缺什么；
+3. 尽量引用来源文件名；本次可用来源：{source_hint}；
+4. 使用中文，结构清晰，不要输出思考过程。"""
+        llm = self._get_llm_service(state)
+        model = llm.get_chat_model(streaming=True)
+        response = await model.ainvoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=f"用户问题：{query}\n\n检索上下文：\n{context[:6000]}"),
+        ], config=config)
+        return {
+            "messages": [response],
+            "agent_steps": [{"step": "response", "content": "基于检索上下文生成最终回答"}],
+        }
 
     async def generate_chat(self, state: AgentState, config: RunnableConfig):
         """闲聊生成节点"""
