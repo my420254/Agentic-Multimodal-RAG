@@ -72,7 +72,50 @@
 | **智能对话** `/chat` | Hybrid RAG 问答 + Agent 思考步骤 + citations |
 | **管理后台** `/admin` | 用户、API Key、模型、系统提示词、审计、观测 |
 
-> 旧的通用 RAG 截图已移除；当前版本的界面截图待补充，避免 README 与实际 UI 不符。
+### 登录
+
+![登录](docs/assets/login.jpg)
+
+### 简历诊断
+
+选择/粘贴简历与目标 JD，输出匹配度、能力雷达、痛点与 STAR 量化重写。截图中的简历内容已用合成数据替代，真实姓名已脱敏。
+
+<details>
+<summary>展开完整诊断报告截图</summary>
+
+![简历诊断](docs/assets/career-resume.jpg)
+
+</details>
+
+### 模拟面试
+
+选择一份简历后，面试官只基于该文件的 top4 chunk 出题，追问带 citations。
+
+![模拟面试](docs/assets/career-interview.jpg)
+
+### 提示词工坊
+
+面试官、简历医生、STAR 重写三类系统提示词可查看、修改并即时生效。
+
+![提示词工坊](docs/assets/career-prompts.jpg)
+
+### 知识库
+
+支持多格式上传、解析状态、chunk 预览、向量化与召回测试。
+
+![知识库](docs/assets/knowledge-base.jpg)
+
+### 智能对话
+
+Hybrid RAG 问答，展示 Agent 步骤、召回详情与 citations。
+
+![智能对话](docs/assets/chat.jpg)
+
+### 管理后台
+
+用户、API Key、模型、系统提示词、审计日志与观测。
+
+![管理后台](docs/assets/admin.jpg)
 
 ## 工作流程
 
