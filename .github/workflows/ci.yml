@@ -93,6 +93,10 @@ jobs:
           cache: npm
           cache-dependency-path: admin-frontend/package-lock.json
 
+      - name: Install shared frontend deps
+        working-directory: frontend
+        run: npm ci
+
       - name: Install admin frontend
         working-directory: admin-frontend
         run: npm ci
