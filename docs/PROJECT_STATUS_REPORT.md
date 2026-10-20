@@ -150,7 +150,7 @@ FastAPI (8000)
 ### 4.4 E2E
 
 - 模拟面试 grounding：**10/10**；
-- Agent 模式（10 条 SRE 问题，通用 smoke，不是求职域主评测）：**10/10** 关键词命中 + citations 非空 + 无 tool_error；
+- Agent 模式（10 条 SRE 问题，通用 smoke，不是求职域主评测）：**9/10** 通过（keyword_ratio ≥75% + 非开头拒答 + citations 非空 + 无 tool_error）；A04 Redis Cluster 自动转移因 KB 覆盖不足被模型正确拒答；
 - 上传 → 解析 → 向量化 → 提问 → 引用：**PASS**；
 - 后端：**127 passed**（新增 35 条 golden/标准指标/tracing/Langfuse/prompt/安全/匹配封顶测试）；
 - 前端：`npm run build` 通过（约 9.4s）。
@@ -434,7 +434,7 @@ TRACE_CONTENT_MODE=redacted   # metadata | redacted | full
 - **求职域 Experiment** `career_quality_baseline`：
   - `match_level_ok` / `score_range_ok` / `fraud_label_ok` / `has_star_rewrite` 均为 **1.000**；
   - Experiment URL：`https://cloud.langfuse.com/project/cmvffar6c0cqxad0jocxy3h59/experiments/results?baseline=40a3377b1057c7f8`；
-- 通用 smoke `agent_sre_v1`：10 条 SRE 用例，`keyword_hit=0.925 / citation=1.0 / no_tool_error=1.0`，不作为求职域主评测；
+- 通用 smoke `agent_sre_v1`：10 条 SRE 用例，`passed=9/10 / keyword_ratio=0.925 / citation=1.0 / no_tool_error=1.0`；A04 因 KB 覆盖不足正确拒答，不作为求职域主评测；
 - 修复：`career_matcher` 在硬技能覆盖率 <34% 时封顶 LOW，避免跨领域简历被学历/项目泛化分抬到 MODERATE。
 - 复算命令：
   ```bash
