@@ -127,9 +127,9 @@ FastAPI (8000)
 
 | 模式 | Success@3 | RR@3 | nDCG@3 | evidence_all@3 | 平均检索延迟 |
 | :--- | ---: | ---: | ---: | ---: | ---: |
-| vector (BGE-M3 + pgvector) | **92.31%** | 0.7094 | 0.7629 | **92.31%** | 464.1 ms |
-| fulltext (BM25/jieba) | 82.05% | 0.7778 | 0.7888 | 82.05% | 71.2 ms |
-| hybrid 0.7/0.3 | 89.74% | 0.7521 | 0.7894 | 89.74% | 544.2 ms |
+| vector (BGE-M3 + pgvector) | **92.31%** | 0.7094 | 0.7629 | **92.31%** | 465.7 ms |
+| fulltext (BM25/jieba) | 82.05% | 0.7778 | 0.7888 | 82.05% | 42.9 ms |
+| hybrid 0.7/0.3 | 89.74% | **0.8034** | **0.8272** | 89.74% | 526.7 ms |
 | hybrid 0.8/0.2 | **92.31%** | — | — | **92.31%** | 未单独计时 |
 
 > 标准指标由 `ir_measures` 计算；`Success@3` 的 relevance = “同一 chunk 同时包含全部 gold_evidence”。
@@ -152,7 +152,7 @@ FastAPI (8000)
 - 模拟面试 grounding：**10/10**；
 - Agent 模式（10 条 SRE 问题，通用 smoke，不是求职域主评测）：**9/10** 通过（keyword_ratio ≥75% + 非开头拒答 + citations 非空 + 无 tool_error）；A04 Redis Cluster 自动转移因 KB 覆盖不足被模型正确拒答；
 - 上传 → 解析 → 向量化 → 提问 → 引用：**PASS**；
-- 后端：**128 passed**（新增 36 条 golden/标准指标/tracing/Langfuse/prompt/安全/匹配封顶测试）；
+- 后端：**132 passed**（新增 40 条 golden/标准指标/tracing/Langfuse/prompt/安全/匹配封顶/路由测试）；
 - 前端：`npm run build` 通过（约 9.4s）。
 
 ### 4.5 延迟
@@ -164,7 +164,7 @@ FastAPI (8000)
 
 ## 5. 测试与质量
 
-- 25 个测试文件，128 条测试；
+- 26 个测试文件，132 条测试；
 - 覆盖：auth/隔离、KB/owner、admin、trace、Agent workflow、工具治理、检索/rerank/缓存、BM25、记忆、prompt、golden eval、chat SSE；
 - 前端构建通过；
 - 未覆盖/薄弱：
@@ -192,7 +192,7 @@ FastAPI (8000)
 - **实测**：`chat:read` key 访问 KB list → 403；`kb:read` key → 200；`/ready` 返回 `postgres/redis/llm=ok`；CORS 未知 Origin → 400；
 - **CI**：`.github/workflows/ci.yml`，后端用 pgvector + Redis service 跑 pytest，前端跑 `npm ci && npm run build`；
 - **Docker**：`docker-compose.yml` + `backend/Dockerfile` + `frontend/Dockerfile`，见 §6.7；
-- 测试：**128 passed**。
+- 测试：**132 passed**。
 
 ## 6. 运行手册
 
@@ -426,7 +426,7 @@ LANGFUSE_HOST=https://cloud.langfuse.com
 TRACE_CONTENT_MODE=redacted   # metadata | redacted | full
 ```
 
-验收前状态：没有 key 时 `tracer.enabled=false`，所有 span 为 no-op，聊天和 128 条测试照常通过；本地 `agent_traces` 继续写。
+验收前状态：没有 key 时 `tracer.enabled=false`，所有 span 为 no-op，聊天和 132 条测试照常通过；本地 `agent_traces` 继续写。
 
 **Datasets / Experiments（2026-10-19，Cloud Hobby）**
 
@@ -520,7 +520,7 @@ curl -s http://127.0.0.1:8000/ready   # PG / Redis / LLM 依赖状态
 ```bash
 git log --oneline -8
 git status --short
-python3 -m pytest tests -q          # 128 passed
+python3 -m pytest tests -q          # 132 passed
 npm run build                       # 通过
 curl http://127.0.0.1:8000/health    # {"status":"ok"}
 curl http://127.0.0.1:8000/ready     # {"status":"ok","checks":{...}}

@@ -22,9 +22,9 @@
     "conflict": "同时指出两份材料各自的原文，不把两处数字合成一个指标。conflict 用例单独评测，不混入 Hit@K/MRR；因为它们本来就要求跨 chunk 取证，用单 chunk 的 evidence_all 计算没有意义。"
   },
   "known_limits": [
-    "简历 PDF/DOCX 目前几乎各是 1 个正文块，论文笔记是 1 个约 7.5 万字的块。这两类题主要检查能否点到正确文件，块内排序没有区分度。",
-    "实习笔记约 202 个块，notes_fact 和 conflict 才是检索难度所在。",
-    "文件状态在库里是 PARSED，向量化完成前不要跑这套题，也不要写成功率。"
+    "简历 PDF/DOCX 分别 7/9 个 chunk；论文笔记已按 500 字 / 50 overlap 重切为 160 个 chunk（旧版是 1 个 7.5 万字符的巨型 chunk，BGE-M3 无法有效编码）。",
+    "实习笔记约 202 个 chunk，notes_fact 和 conflict 才是检索难度所在。",
+    "文件状态需为 READY/PARSED，向量化完成后再跑这套题；未完成前不要写成功率。"
   ],
   "cases": [
     {
@@ -266,7 +266,7 @@
       "query": "论文笔记里去掉 AHSP 后，SST-5 Config B 的标准差从多少变成多少？",
       "gold_file": "HiPro-LoRA.md",
       "gold_evidence": [
-        "SST-5 Config B",
+        "SST-5 配置 B",
         "标准差",
         "1.69",
         "23.03"

@@ -214,7 +214,7 @@ class ChatRequest(BaseModel):
     stream: bool = True
     use_rewrite: bool = False
     mode: Optional[str] = "chat"
-    top_k: Optional[int] = 50
+    top_k: Optional[int] = 5
     score_threshold: Optional[float] = 0.0
     model_id: Optional[str] = None
     rerank_enabled: bool = False

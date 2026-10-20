@@ -170,6 +170,73 @@ def jaccard_similarity(text1: str, text2: str) -> float:
     return intersection / union if union > 0 else 0.0
 
 
+def _file_kind(file_name: str) -> str:
+    name = (file_name or "").lower()
+    # 简历可能是 PDF/DOCX，也可能是 JPG/PNG OCR
+    if name.endswith((".pdf", ".docx", ".jpg", ".jpeg", ".png", ".webp", ".bmp")):
+        return "resume"
+    if name.endswith(".md"):
+        return "notes"
+    return "other"
+
+
+def _round_robin_by_file(
+    results: List[Dict[str, Any]],
+    limit: int,
+    *,
+    max_per_file: int,
+) -> List[Dict[str, Any]]:
+    """按文件轮询取结果，避免单个大文件垄断 top-k。"""
+    buckets: Dict[str, List[Dict[str, Any]]] = {}
+    for row in results:
+        buckets.setdefault(row.get("file_name") or "未知文件", []).append(row)
+    ordered_files = sorted(
+        buckets,
+        key=lambda name: max(float(r.get("score") or 0) for r in buckets[name]),
+        reverse=True,
+    )
+    out: List[Dict[str, Any]] = []
+    for round_idx in range(max_per_file):
+        for file_name in ordered_files:
+            rows = buckets[file_name]
+            if round_idx < len(rows):
+                out.append(rows[round_idx])
+                if len(out) >= limit:
+                    return out
+    return out
+
+
+def _candidate_k(query: str, top_k: int) -> int:
+    """显式文件意图查询需要更大的候选池，否则正确文件进不了 top-k。"""
+    if any(key in query for key in ("简历", "笔记", "论文")):
+        return 100
+    return max(top_k * 4, 20)
+
+
+def _route_by_file_intent(
+    query: str,
+    results: List[Dict[str, Any]],
+    limit: int,
+) -> List[Dict[str, Any]]:
+    """当查询明确提到“简历 / 笔记 / 论文”时，优先对应文件类型。
+
+    个人材料库同时包含简历 PDF/DOCX、实习笔记和论文笔记，单一文件很容易
+    在 top-k 里垄断。这里只做显式意图路由，不改变普通检索的排序。
+    纯简历库 / 纯笔记库不启用，否则会把同类文件之间的正常排序打乱。
+    """
+    kinds = {_file_kind(r.get("file_name", "")) for r in results} - {"other"}
+    if len(kinds) <= 1:
+        return results[:limit]
+
+    if "简历" in query:
+        preferred = [r for r in results if _file_kind(r.get("file_name", "")) == "resume"]
+        return _round_robin_by_file(preferred or results, limit, max_per_file=2)
+    if "笔记" in query or "论文" in query:
+        preferred = [r for r in results if _file_kind(r.get("file_name", "")) == "notes"]
+        return _round_robin_by_file(preferred or results, limit, max_per_file=3)
+    return results[:limit]
+
+
 class RetrievalService:
     """
     统一检索服务
@@ -321,8 +388,9 @@ class RetrievalService:
                     except Exception:
                         results = []
 
-            # 去重
+            # 去重 + 显式文件意图路由（简历/笔记/论文）
             results = deduplicate_results(results)
+            results = _route_by_file_intent(query, results, top_k)
 
             # 计算总耗时
             total_latency = (time.time() - start_time) * 1000
@@ -365,10 +433,12 @@ class RetrievalService:
         """向量检索"""
         start_time = time.time()
 
+        # 先取更大的候选池，给文件意图路由/多样性留空间
+        candidate_k = _candidate_k(query, top_k)
         all_results = []
         for kb_id in kb_ids:
             query_vector = await self._embed_query_for_kb(session, kb_id, query)
-            results = self._query_vector(session, kb_id, query_vector, top_k, score_threshold)
+            results = self._query_vector(session, kb_id, query_vector, candidate_k, score_threshold)
 
             # 补充知识库信息
             kb = session.get(KnowledgeBase, kb_id)
@@ -384,7 +454,7 @@ class RetrievalService:
 
         # 按分数排序
         all_results.sort(key=lambda x: x.get("score", 0), reverse=True)
-        all_results = all_results[:top_k]
+        all_results = all_results[:candidate_k]
 
         latency = (time.time() - start_time) * 1000
         metrics = {
@@ -408,13 +478,14 @@ class RetrievalService:
         """BM25 全文检索"""
         start_time = time.time()
 
+        candidate_k = _candidate_k(query, top_k)
         all_results = []
         for kb_id in kb_ids:
             results = self.bm25_index.search(
                 session=session,
                 query=query,
                 kb_id=kb_id,
-                top_k=top_k
+                top_k=candidate_k
             )
 
             # 补充知识库信息
@@ -433,7 +504,7 @@ class RetrievalService:
 
         # 按分数排序
         all_results.sort(key=lambda x: x.get("score", 0), reverse=True)
-        all_results = all_results[:top_k]
+        all_results = all_results[:candidate_k]
 
         latency = (time.time() - start_time) * 1000
         metrics = {
@@ -521,8 +592,9 @@ class RetrievalService:
             b_score = bm25_scores.get(chunk_id, 0)
             fused_scores[chunk_id] = vector_weight * v_score + bm25_weight * b_score
 
-        # 5. 排序并取 top_k
-        sorted_chunks = sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)[:top_k]
+        # 5. 排序并取候选池（最终 top_k 由 search 的文件意图路由决定）
+        candidate_k = _candidate_k(query, top_k)
+        sorted_chunks = sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)[:candidate_k]
 
         # 6. 获取完整信息
         # 合并原始结果用于获取 metadata

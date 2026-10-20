@@ -286,7 +286,9 @@ class AgentWorkflow:
                 
                 # 注入基础检索参数
                 if "top_k" in search_params and "top_k" not in agent_args:
-                    final_args["top_k"] = search_params["top_k"]
+                    # ChatRequest 允许 50，但工具契约上限是 20；这里统一夹紧，
+                    # 避免直接调 API 时 50 被 Pydantic 拒绝成 tool_error。
+                    final_args["top_k"] = max(1, min(int(search_params["top_k"]), 20))
                     
                 if "score_threshold" in search_params and "score_threshold" not in agent_args:
                     final_args["score_threshold"] = search_params["score_threshold"]
@@ -306,7 +308,7 @@ class AgentWorkflow:
                      final_args["use_rerank"] = search_params["rerank_enabled"]
                 
                 if "rerank_top_k" in search_params and "rerank_top_k" not in agent_args:
-                     final_args["rerank_top_k"] = search_params["rerank_top_k"]
+                     final_args["rerank_top_k"] = max(1, min(int(search_params["rerank_top_k"]), 20))
                      
                 if "rerank_score_threshold" in search_params and "rerank_score_threshold" not in agent_args:
                      final_args["rerank_score_threshold"] = search_params["rerank_score_threshold"]

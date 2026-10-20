@@ -39,9 +39,11 @@ PostgreSQL + pgvector / Redis / DeepSeek / SiliconFlow
 |---|---:|---:|---:|
 | vector | **92.31%** | 0.7094 | 0.7629 |
 | fulltext | 82.05% | 0.7778 | 0.7888 |
-| hybrid 0.7/0.3 | 89.74% | 0.7521 | 0.7894 |
+| hybrid 0.7/0.3 | 89.74% | **0.8034** | **0.8272** |
 
 结论：BM25 更快、纯向量更准，hybrid 作为可调策略保留。**不写“混合检索显著提升”。**
+
+个人材料库还做了一个质量修复：论文笔记从 1 个 75,712 字符巨型 chunk 重切为 160 个 chunk，并加“简历/笔记/论文”文件意图路由；vector 65.52%→79.31%，hybrid 79.31%→86.21%。
 
 ### 决策 2：单工具 Agent，不做多 Agent 平台
 
@@ -66,7 +68,7 @@ PostgreSQL + pgvector / Redis / DeepSeek / SiliconFlow
 - 10 条面试 grounding：10/10 通过
 - 5 条求职域合成用例（`career_demo_v1`）：匹配 + 反欺诈 4 个 evaluator 均为 1.0
 - 跨领域简历匹配修复：硬技能覆盖率 <34% 时封顶 LOW，避免“学前教育简历 vs Agent 岗”被抬到 MODERATE
-- 后端测试：128 passed
+- 后端测试：132 passed
 - 延迟：单条样本，**不是 P95**
 
 ## 5. 生产化与安全

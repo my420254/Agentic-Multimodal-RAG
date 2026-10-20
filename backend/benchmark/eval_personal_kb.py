@@ -40,7 +40,11 @@ from app.core.config import get_settings  # noqa: E402
 from app.core.database import engine  # noqa: E402
 from app.models import DocumentChunk, FileDocument, KnowledgeBase  # noqa: E402
 from app.services.bm25 import BM25Index  # noqa: E402
-from app.services.retrieval import RetrievalService, normalize_scores  # noqa: E402
+from app.services.retrieval import (  # noqa: E402
+    RetrievalService,
+    _route_by_file_intent,
+    normalize_scores,
+)
 from benchmark.metrics import (  # noqa: E402
     build_qrels,
     is_retrieval_case,
@@ -268,11 +272,16 @@ def main() -> int:
 
             hybrid_start = time.perf_counter()
             hybrid_results = _fuse(
-                svc, session, vector_results, bm25_results, 0.7, 0.3, top_k=5
+                svc, session, vector_results, bm25_results, 0.7, 0.3, top_k=20
             )
             hybrid_latency = vector_latency + bm25_latency + (
                 time.perf_counter() - hybrid_start
             ) * 1000
+
+            # 与线上 search() 一致：按“简历/笔记/论文”意图路由 + 文件轮询
+            vector_top = _route_by_file_intent(query, vector_results, 5)
+            bm25_top = _route_by_file_intent(query, bm25_results, 5)
+            hybrid_top = _route_by_file_intent(query, hybrid_results, 5)
 
             row = {
                 "id": case["id"],
@@ -290,10 +299,10 @@ def main() -> int:
                                 "score": round(float(r.get("score", 0)), 4),
                                 "snippet": r.get("content", "")[:160].replace("\n", " "),
                             }
-                            for i, r in enumerate(vector_results[:5])
+                            for i, r in enumerate(vector_top[:5])
                         ],
-                        "k1": _metrics_at_k(vector_results, evidence, gold_file, 1),
-                        "k3": _metrics_at_k(vector_results, evidence, gold_file, 3),
+                        "k1": _metrics_at_k(vector_top, evidence, gold_file, 1),
+                        "k3": _metrics_at_k(vector_top, evidence, gold_file, 3),
                     },
                     "fulltext": {
                         "results": [
@@ -303,10 +312,10 @@ def main() -> int:
                                 "score": round(float(r.get("score", 0)), 4),
                                 "snippet": r.get("content", "")[:160].replace("\n", " "),
                             }
-                            for i, r in enumerate(bm25_results[:5])
+                            for i, r in enumerate(bm25_top[:5])
                         ],
-                        "k1": _metrics_at_k(bm25_results, evidence, gold_file, 1),
-                        "k3": _metrics_at_k(bm25_results, evidence, gold_file, 3),
+                        "k1": _metrics_at_k(bm25_top, evidence, gold_file, 1),
+                        "k3": _metrics_at_k(bm25_top, evidence, gold_file, 3),
                     },
                     "hybrid": {
                         "results": [
@@ -316,10 +325,10 @@ def main() -> int:
                                 "score": round(float(r.get("score", 0)), 4),
                                 "snippet": r.get("content", "")[:160].replace("\n", " "),
                             }
-                            for i, r in enumerate(hybrid_results[:5])
+                            for i, r in enumerate(hybrid_top[:5])
                         ],
-                        "k1": _metrics_at_k(hybrid_results, evidence, gold_file, 1),
-                        "k3": _metrics_at_k(hybrid_results, evidence, gold_file, 3),
+                        "k1": _metrics_at_k(hybrid_top, evidence, gold_file, 1),
+                        "k3": _metrics_at_k(hybrid_top, evidence, gold_file, 3),
                     },
                 },
                 "latency_ms": {
@@ -334,19 +343,20 @@ def main() -> int:
                 row[f"{mode}_latency"] = row["latency_ms"][mode]
 
             case_rows.append(row)
-            runs_by_mode["vector"][case["id"]] = results_to_run(vector_results)
-            runs_by_mode["fulltext"][case["id"]] = results_to_run(bm25_results)
-            runs_by_mode["hybrid"][case["id"]] = results_to_run(hybrid_results)
+            runs_by_mode["vector"][case["id"]] = results_to_run(vector_top)
+            runs_by_mode["fulltext"][case["id"]] = results_to_run(bm25_top)
+            runs_by_mode["hybrid"][case["id"]] = results_to_run(hybrid_top)
 
             # 权重扫描：复用同一批 raw 结果，不重复 embedding
             for pair in HYBRID_WEIGHTS:
-                fused = _fuse(svc, session, vector_results, bm25_results, pair[0], pair[1], top_k=5)
+                fused = _fuse(svc, session, vector_results, bm25_results, pair[0], pair[1], top_k=20)
+                fused_top = _route_by_file_intent(query, fused, 5)
                 weight_rows[pair].append(
                     {
                         "id": case["id"],
                         "latency_ms": vector_latency + bm25_latency,
-                        "k1": _metrics_at_k(fused, evidence, gold_file, 1),
-                        "k3": _metrics_at_k(fused, evidence, gold_file, 3),
+                        "k1": _metrics_at_k(fused_top, evidence, gold_file, 1),
+                        "k3": _metrics_at_k(fused_top, evidence, gold_file, 3),
                     }
                 )
 
@@ -361,12 +371,13 @@ def main() -> int:
                     session,
                     [{"id": r["chunk_id"], "score": r["bm25_score"], "kb_id": KB_ID} for r in raw],
                 )
+                enriched_top = _route_by_file_intent(query, enriched, 5)
                 bm25_rows[pair].append(
                     {
                         "id": case["id"],
                         "latency_ms": elapsed,
-                        "k1": _metrics_at_k(enriched, evidence, gold_file, 1),
-                        "k3": _metrics_at_k(enriched, evidence, gold_file, 3),
+                        "k1": _metrics_at_k(enriched_top, evidence, gold_file, 1),
+                        "k3": _metrics_at_k(enriched_top, evidence, gold_file, 3),
                     }
                 )
 
