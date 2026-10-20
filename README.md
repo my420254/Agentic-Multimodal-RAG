@@ -1,150 +1,133 @@
 <div align="center">
 
-# Agentic Multimodal RAG
+# 辽大·求职 Agent
 
-**把 PDF、Word、表格和图片变成可检索、可追溯的 Agent 知识库**
+**面向高校学生的 Agentic 求职助手：简历诊断、模拟面试、岗位反欺诈与可追溯知识库问答**
 
-面向复杂文档的 Agentic Multimodal Retrieval-Augmented Generation (RAG) 系统：组合向量检索与 BM25，经过重排和上下文扩展后，由 LangGraph Agent 判断结果质量并在必要时重新检索。
+把简历、项目材料、招聘 JD 和面试对话串成一条可评测、可观测的求职链路，而不是只做一个“文档问答 Demo”。
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/React-TypeScript-149ECA?logo=react&logoColor=white)](https://react.dev/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-Agent-1C3C3C)](https://github.com/langchain-ai/langgraph)
+[![Langfuse](https://img.shields.io/badge/Langfuse-Observability-0A7AFF)](https://langfuse.com/)
 [![CI](https://github.com/my420254/Agentic-Multimodal-RAG/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/my420254/Agentic-Multimodal-RAG/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-MIT-black.svg)](LICENSE)
 
-[功能亮点](#功能亮点) · [界面预览](#界面预览) · [工作流程](#工作流程) · [快速开始](#快速开始)
+[功能](#功能) · [工作流程](#工作流程) · [快速开始](#快速开始) · [评测与可观测](#评测与可观测) · [项目结构](#项目结构)
 
 </div>
 
-## 为什么做这个项目？
+## 这个项目解决什么问题？
 
-常见 RAG Demo 往往停留在“切块、向量搜索、生成回答”。Agentic Multimodal RAG 关注更完整的知识处理闭环：文档结构如何保留、图像如何进入索引、关键词和语义召回如何融合、低质量检索如何被识别，以及整个过程如何在界面中被观察和调试。
+高校学生求职时通常有三个断点：
 
-| 常见实现 | Agentic Multimodal RAG |
-| --- | --- |
-| 主要处理纯文本 | 支持 PDF、Word、Markdown、文本、表格和图片 |
-| 仅使用向量相似度 | Vector、BM25、加权 Hybrid 三种检索模式 |
-| 固定长度切块 | 标题感知、语义切分和邻接上下文扩展 |
-| 一次检索后直接回答 | Agent 检查相关性，低质量结果可重写问题并重试 |
-| 检索过程难以观察 | 展示召回来源、相似度、延迟和 Agent 思考步骤 |
-| 模型配置耦合 | LLM、Embedding、VLM、Rerank 可分别配置 |
+1. **简历不知道弱在哪**：项目描述全是“负责/参与/优化”，没有量化、没有取舍、没有边界；
+2. **面试没有真实追问**：背题库不等于能应对“基于你简历的追问”；
+3. **招聘信息真假难辨**：培训贷、境外诱导、刷单灰产等风险信息混在 JD 里。
 
-## 功能亮点
+这个项目把三件事做成一条链路：
 
-- **多模态文档解析**：提取正文、标题层级、表格与图片内容，并保留文档结构信息。
-- **检索质量反思与有限重试**：Agent 对召回结果做相关性评分，低于阈值时改写 query 重试，最多 3 次，并带重复调用熔断。
-- **双路混合检索**：结合 pgvector 向量检索和 BM25 关键词检索，兼顾语义理解与精确关键词命中；Chroma 仅保留回滚/对比。
-- **父子 Chunk 与上下文恢复**：命中子 Chunk 后可拼接父文档及相邻 Chunk，减少孤立片段带来的语义缺失。
-- **本地与远程双模式 Rerank**：本地 Cross-Encoder 自动选择 CUDA 或 CPU，也可接入远程 Rerank API。
-- **可解释的 Agent 执行轨迹**：基于 LangGraph 展示意图分析、工具调用、检索耗时、质量判断和低相关性重试。
-- **图文联合召回**：图片描述和文本 Chunk 可统一进入检索流程，回答中保留引用来源。
-- **异步文档处理链路**：可通过 Celery 与 Redis 在后台执行文档解析、图片理解和向量化任务；开发环境默认同步兜底。
-- **模型能力解耦**：LLM、Embedding、VLM 与 Rerank 分别配置，可自由组合本地模型和兼容 API 服务。
-- **召回质量分析**：在 Web UI 中查看 Top K、相似度、召回详情、耗时及检索历史。
-- **可选 LLM 可观测性**：可接入 Langfuse（Cloud Hobby 免费版）追踪 retrieval、tool、LLM、rerank span；Agent prompt 由 Langfuse production label 管理，代码默认值作为 fallback；未配置 key 时自动 no-op，本地 `agent_traces` 继续作为 fallback。
+- 简历/材料上传 → 解析 → 切块 → Hybrid RAG；
+- 简历 × JD 匹配 → 能力雷达 → STAR 重写（事实保真，没数据就留占位符）；
+- 选中一份简历 → 检索 top chunk → 模拟面试官追问 + 引用；
+- 岗位 JD → 反欺诈规则 + 可选 LLM 审计；
+- 全链路 trace / dataset / experiment / prompt 版本。
 
-## 界面预览
+## 功能
 
-### 1. 知识库与多格式文档管理
+### 求职核心
 
-集中管理不同类型的知识库、解析状态、Chunk 数量及其 Embedding 配置。
+- **简历深度诊断**：按目标 JD 计算综合匹配度、硬技能缺口、能力雷达、关键优势与薄弱项；
+- **STAR 量化重写**：只重组简历已有事实，没有实测数字时保留 `[请补充真实数据]` 占位符，不编造；
+- **模拟面试**：选择一份简历，按 `resume_file_id` 只检索该文件的 top4 chunk，再出题、追问、打分、给改进建议；回答带 citations；
+- **岗位反欺诈**：培训贷、境外高薪、刷单、扣押证件等规则识别，可选 LLM 深度审计；
+- **提示词工坊**：用户级 `mock_interviewer` / `resume_doctor` / `star_rewriter` 覆盖。
 
-![知识库管理](docs/assets/knowledge-base-management.png)
+### RAG 与 Agent
 
-### 2. Agent 思考与检索过程
+- **多模态解析**：PDF、DOCX、Markdown、TXT、JPG、PNG；保留标题层级、图片 chunk 与引用位置；
+- **Hybrid 检索**：pgvector 向量 + jieba BM25 加权融合，可选 Rerank 与上下文扩展；
+- **单工具 LangGraph Agent**：意图路由 → `search_knowledge_base` → grading → 低质量重试（最多 3 次）→ 最终回答；
+- **工具治理**：Pydantic schema、`extra=forbid`、超时、瞬时重试、错误分类、重复调用熔断；
+- **引用可追溯**：回答返回 `citations`（文件、chunk、页码/位置、分数）。
 
-Agent 会分析意图、生成检索查询、调用工具并记录每一步耗时。
+### 工程与运营
 
-![Agent 思考与检索过程](docs/assets/agent-reasoning.png)
+- **鉴权与隔离**：JWT access/refresh、API Key SHA-256、owner 校验、逐路由 scope、Admin 角色、审计日志；
+- **多租户边界**：KB/file/chunk 在 API/Agent 层做 owner 隔离；**不是 PostgreSQL RLS**；
+- **可观测**：Langfuse trace / dataset / experiment / prompt；本地 `agent_traces` fallback；Prometheus + request_logs；
+- **生产化**：Alembic migration、`/ready` 检查 PG/Redis/LLM、CORS 白名单、统一异常 + `request_id`、Docker Compose、CI。
 
-### 3. 多模态回答
+## 实际界面
 
-回答结果支持结构化 Markdown，可结合图片内容给出分析，并继续追溯引用上下文。
+当前前端导航（登录后）：
 
-![多模态回答](docs/assets/multimodal-answer.png)
+| 页面 | 作用 |
+| :--- | :--- |
+| **简历诊断** `/career/resume` | 选简历 → 对比 JD → 匹配度/雷达/STAR 重写 |
+| **模拟面试** `/career/interview` | 选简历 → 多轮追问 → 评分与改进建议 |
+| **提示词工坊** `/career/prompts` | 用户级面试官/简历医生提示词覆盖 |
+| **知识库** `/kb` | 上传、解析、切块、向量化、召回测试 |
+| **智能对话** `/chat` | Hybrid RAG 问答 + Agent 思考步骤 + citations |
+| **管理后台** `/admin` | 用户、API Key、模型、系统提示词、审计、观测 |
 
-### 4. 召回详情与相似度评分
-
-召回面板同时呈现图片和文本结果、所属文件、Chunk 位置以及相似度分数。
-
-![召回详情](docs/assets/retrieval-details.png)
-
-<details>
-<summary><strong>查看完整端到端测试长图</strong></summary>
-
-从 Agent 任务分解、回答生成到图文来源展示的完整页面记录：
-
-![完整端到端测试](docs/assets/end-to-end-test.png)
-
-</details>
+> 旧的通用 RAG 截图已移除；当前版本的界面截图待补充，避免 README 与实际 UI 不符。
 
 ## 工作流程
 
 ```mermaid
 flowchart LR
-    A["PDF / Word / Excel / Markdown / Image"] --> B["结构化解析"]
-    B --> C["标题感知与语义切分"]
+    A["简历 / 项目材料 / JD"] --> B["多模态解析"]
+    B --> C["标题感知 / 递归切块"]
     C --> D["pgvector 向量索引"]
-    C --> E["BM25 全文索引"]
+    C --> E["jieba BM25 索引"]
 
-    Q["用户问题"] --> F["检索策略"]
-    D --> F
-    E --> F
-    F --> G["融合、去重、上下文扩展、Rerank"]
-    G --> H["LangGraph Agent"]
-    H --> I{"相关性足够？"}
-    I -- "否" --> J["重写问题并重新检索"]
-    J --> F
-    I -- "是" --> K["生成带来源的回答"]
+    Q["求职任务"] --> F{"入口"}
+    F -->|简历诊断| G["简历 × JD 匹配 + STAR 重写"]
+    F -->|模拟面试| H["按 resume_file_id 检索 top4 chunk"]
+    F -->|岗位反欺诈| I["规则 + 可选 LLM 审计"]
+    F -->|知识库问答| J["Hybrid RAG"]
+    D --> J
+    E --> J
+    J --> K["LangGraph Agent"]
+    K --> L{"相关性足够？"}
+    L -->|否| M["改写 query 重试"]
+    M --> J
+    L -->|是| N["带 citations 的回答"]
+    G --> O["Langfuse trace / dataset / experiment"]
+    H --> O
+    I --> O
+    N --> O
 ```
-
-## 检索模式
-
-| 模式 | 适用场景 | 说明 |
-| --- | --- | --- |
-| `vector` | 语义相似、同义表达、自然语言问题 | 使用 Embedding 计算语义相似度 |
-| `fulltext` | 文件名、术语、编号、精确关键词 | 使用 BM25 进行全文匹配 |
-| `hybrid` | 通用知识问答与复杂检索 | 对 Vector 和 BM25 结果进行加权融合 |
-
-Hybrid 结果还可以继续执行 Rerank、阈值过滤、去重和邻接 Chunk 扩展，从而为 Agent 提供更完整的上下文。
 
 ## 技术架构
 
 ```text
-React + TypeScript + Vite
-            |
-            v
-        FastAPI API
-            |
-     +------+-------------------+
-     |                          |
-Document Pipeline          Agent Workflow
-     |                          |
-Parser -> Chunk -> Index    Intent -> Retrieve -> Observe -> Retry
-     |                          |
-     +----> pgvector / BM25 <-----+
-                 |
-       Rerank / Context Expansion
-                 |
-        LLM / Embedding / VLM
+React + TypeScript + Vite + Ant Design
+                |
+                v
+            FastAPI
+  ┌─────────────┼──────────────┬──────────────┐
+  │             │              │              │
+Auth/KB      Retrieval      Career/Interview  Admin
+  │             │              │              │
+  └──────┬──────┴──────┬───────┴──────┬───────┘
+         │             │              │
+   PostgreSQL      Redis          LLM / Embedding / VLM / Rerank
+   + pgvector     cache/session    DeepSeek / SiliconFlow / Ollama
+         │
+    Langfuse (trace / dataset / experiment / prompt)
 ```
 
-主要技术组件：
+主要组件：
 
 - Backend：FastAPI、SQLModel、LangGraph、Celery（可选）
 - Frontend：React、TypeScript、Vite、Ant Design
-- Retrieval：pgvector、BM25、Cross-Encoder/API Rerank
-- Models：Ollama 或 OpenAI-compatible API
-- Storage：PostgreSQL（含 pgvector）、Redis、文件存储；Chroma 仅回滚
-
-## 评测与可观测性
-
-- **检索指标**：标准 `Success@3` / `P@3` / `Recall@3` / `RR@3` / `nDCG@3` 由 `ir_measures` 计算；`evidence_all@3` 等自定义口径保留用于历史对齐；
-- **Golden 体检**：`python benchmark/validate_golden.py --golden ... --kb-id ...`；
-- **Langfuse（可选）**：配置 `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` 后，聊天会记录 retrieval、tool、LLM、rerank span；未配置时自动 no-op；
-- **Dataset / Experiment**：求职域合成简历用例可用 `python benchmark/langfuse_career_dataset.py --run-experiment` 上传并跑 baseline；
-- **PII**：真实简历相关 trace 建议 `TRACE_CONTENT_MODE=metadata`，或使用自托管 Langfuse；不要把原始简历正文发到 Cloud。
+- Retrieval：pgvector + HNSW、jieba BM25、Hybrid、可选 Rerank
+- 评测：`ir_measures`、golden set、Langfuse Experiments
+- 存储：PostgreSQL（含 pgvector）、Redis、本地文件存储
+- 工程：Alembic、pytest、GitHub Actions、Docker Compose
 
 ## 快速开始
 
@@ -152,9 +135,9 @@ Parser -> Chunk -> Index    Intent -> Retrieve -> Observe -> Retry
 
 - Python 3.10+
 - Node.js 18+
-- Ollama 或其他 OpenAI-compatible 模型服务
-- Redis（可选，用于后台解析与向量化任务）
-- NVIDIA GPU（可选，仅本地模型推理或本地 Rerank 加速时使用）
+- PostgreSQL 16+ 且安装 pgvector
+- Redis
+- 任意 OpenAI-compatible 模型服务（DeepSeek / SiliconFlow / Ollama 等）
 
 ### 1. 克隆项目
 
@@ -167,39 +150,39 @@ cd Agentic-Multimodal-RAG
 
 ```bash
 python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\Activate.ps1
 
-# Linux / macOS
-source .venv/bin/activate
-
-# Windows PowerShell
-# .venv\Scripts\Activate.ps1
-
-pip install -r requirements.txt \
-  --extra-index-url https://download.pytorch.org/whl/cu118
-copy backend\.env.example backend\.env  # Windows
-# cp backend/.env.example backend/.env   # Linux / macOS
-
-# JWT_SECRET 必填（至少 32 字符），写入 backend/.env
-python3 -c "import secrets; print('JWT_SECRET=' + secrets.token_urlsafe(48))"
-
-cd backend
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+pip install -r requirements.txt
+cp backend/.env.example backend/.env
 ```
 
-编辑 `backend/.env`，配置自己的模型服务：
+编辑 `backend/.env`，至少配置：
 
 ```dotenv
-LLM_BASE_URL=http://localhost:11434/v1
-LLM_API_KEY=ollama
-LLM_MODEL=qwen2.5:7b
+DATABASE_URL=postgresql+psycopg2://postgres:postgres@localhost:5432/agent_db
+REDIS_URL=redis://localhost:6379/0
+JWT_SECRET=<至少 32 字符，用 secrets.token_urlsafe 生成>
 
-EMBEDDING_BASE_URL=http://localhost:11434/v1
-EMBEDDING_API_KEY=ollama
-EMBEDDING_MODEL=nomic-embed-text
+LLM_BASE_URL=https://api.deepseek.com/v1
+LLM_API_KEY=...
+LLM_MODEL=deepseek-chat
 
-VLM_BASE_URL=http://localhost:11434/v1
-VLM_API_KEY=ollama
-VLM_MODEL=llava:7b
+EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1
+EMBEDDING_API_KEY=...
+EMBEDDING_MODEL=BAAI/bge-m3
+```
+
+启动：
+
+```bash
+cd backend
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+首次启动会自动执行 Alembic migration；也可以手动：
+
+```bash
+alembic upgrade head
 ```
 
 ### 3. 启动前端
@@ -210,13 +193,19 @@ npm ci
 npm run dev
 ```
 
-启动完成后访问：`http://localhost:3000`
+访问 `http://localhost:3000`，登录后默认进入 **简历诊断**。
 
-> 本地 Rerank 模型会自动选择 `cuda` 或 `cpu`；使用远程 Rerank API 时，FastAPI 进程不加载本地模型。
->
-> 当前依赖文件固定了 PyTorch CUDA 11.8 构建，因此安装命令包含 PyTorch 官方索引。没有 NVIDIA GPU 时仍可运行 CPU 回退路径，但依赖体积会更大。
+### 4. 初始化本地数据（可选）
 
-### 4. Docker Compose（可选）
+```bash
+cd backend
+python scripts/seed_admin.py          # 管理员账号
+python scripts/seed_demo_users.py     # 演示学生账号
+python scripts/ingest_real_resumes.py # 本地真实简历（PII，不要提交）
+python scripts/sync_pgvector.py       # 同步向量
+```
+
+### 5. Docker Compose（可选）
 
 ```bash
 export JWT_SECRET="$(python3 -c 'import secrets;print(secrets.token_urlsafe(48))')"
@@ -225,30 +214,102 @@ docker compose up -d
 curl http://127.0.0.1:8000/ready
 ```
 
-前端：`http://127.0.0.1:3000`，后端：`http://127.0.0.1:8000`。  
-使用宿主机 Ollama 时，把 `backend/.env` 的 `LLM_BASE_URL` / `EMBEDDING_BASE_URL` 改为 `http://host.docker.internal:11434/v1`。更多说明见 [`docs/DOCKER.md`](docs/DOCKER.md)。
+前端 `http://127.0.0.1:3000`，后端 `http://127.0.0.1:8000`。  
+使用宿主机 Ollama 时，把 `LLM_BASE_URL` / `EMBEDDING_BASE_URL` 改为 `http://host.docker.internal:11434/v1`。详见 [`docs/DOCKER.md`](docs/DOCKER.md)。
+
+## 评测与可观测
+
+### 求职域指标
+
+| 评测 | 数据 | 结果 |
+| :--- | :--- | :--- |
+| 真实简历检索 | 42 条 golden、54 chunks | vector `evidence_all@3 = 92.31%`，`RR@3 = 0.7094` |
+| 模拟面试 grounding | 10 条真实简历 × 岗位 | **10/10** 通过 |
+| 求职匹配 / 反欺诈 | `career_demo_v1` 5 条合成简历 | 4 个 evaluator 均 **1.000** |
+| 后端测试 | 126 条 | **126 passed**（CI 121 passed + 5 skipped） |
+
+> `evidence_all@3` 是检索命中，不是回答准确率；延迟是单条样本，不是 P95。  
+> Hybrid 没有稳定超过纯向量：BM25 更快、向量更准，hybrid 作为可调策略保留。
+
+### Langfuse
+
+```bash
+# 同步 Agent prompt（5 个 key，production label）
+python backend/scripts/sync_langfuse_prompts.py
+
+# 求职域 dataset + experiment
+python backend/benchmark/langfuse_career_dataset.py --run-experiment
+
+# 通用 Agent smoke（SRE 非 PII 语料）
+python backend/benchmark/langfuse_agent_dataset.py --run-experiment
+```
+
+- Trace：`chat.request → retrieval → tool → LLM → grading → answer`；
+- Dataset / Experiment：`career_demo_v1` / `career_quality_baseline`；
+- Prompt：`agent.intent` / `agent.system` / `agent.grading` / `agent.answer` / `agent.chat`；
+- 未配置 key 时自动 no-op，本地 `agent_traces` 继续工作。
+
+### Golden 体检
+
+```bash
+cd backend
+python benchmark/validate_golden.py \
+  --golden benchmark/personal_kb_golden.json \
+  --kb-id <your-kb-id>
+```
+
+### PII
+
+- 真实简历、OCR corpus、逐题报告、`real_resumes_golden.json` 全部 gitignore；
+- tracked golden 使用 `resume.pdf` / `resume.docx` 别名，真实文件名只在本机 ignored 的 `personal_kb_files.local.json`；
+- Langfuse Cloud 只上传求职域合成简历和 SRE smoke；真实简历 trace 使用 `TRACE_CONTENT_MODE=metadata/redacted` 或自托管。
 
 ## 项目结构
 
 ```text
 backend/app/
-├── api/                 API 路由
-├── core/                配置、数据库与本地 Rerank 加载器
-├── services/            解析、Embedding、检索、重排与 Agent 服务
-├── tasks/               Celery 后台任务
-└── tools/               Agent 检索工具
+├── api/                     auth / chat / career / knowledge_base / files / chunks / recall / admin / benchmark
+├── core/                    配置、数据库、鉴权、access、metrics、rate limit、rerank loader、tracing
+├── models/                  SQLModel 表
+├── services/
+│   ├── retrieval.py         pgvector + BM25 + hybrid + rerank + cache
+│   ├── agent_workflow.py    LangGraph：intent → tool → grading → retry → answer
+│   ├── mock_interview.py    基于选中简历 chunk 的模拟面试
+│   ├── career_matcher.py    简历 × JD 匹配 + STAR 重写
+│   ├── job_fraud_detector.py 岗位反欺诈
+│   ├── prompt_registry.py   Langfuse prompt + code fallback
+│   └── trace_service.py     本地 trace fallback
+├── tools/                   search_knowledge_base + governance
+├── tasks/                   Celery（可选）
+├── benchmark/               42/10/10 golden、标准指标、Langfuse dataset/experiment
+├── alembic/                 baseline migration
+└── tests/                   126 条测试
 
 frontend/src/
-├── components/          通用组件
-├── pages/               知识库、对话、召回测试与设置页面
-├── services/            API 客户端
-├── stores/              状态管理
-└── types/               TypeScript 类型
+├── pages/CareerCenter/      简历诊断 / 模拟面试 / 提示词工坊
+├── pages/KnowledgeBase/     上传、详情、chunk 预览、召回测试
+├── pages/Chat/              流式问答 + Agent 步骤 + citations
+├── pages/Admin/             用户 / API Key / 模型 / Prompt / 审计 / 观测
+└── services/                API 客户端
 ```
+
+## 已知边界
+
+- 单工具 Agent，不是通用 Agent harness 平台；没有多 Agent / Supervisor / Handoff；
+- 没有 LangGraph Checkpoint 跨进程恢复、HITL、MCP / Skills；
+- 没有生产级压测 / QPS / P95；没有统一 LLM Gateway 路由/配额；
+- 多租户是 API/Agent 层 owner 隔离，不是 PostgreSQL RLS；
+- 没有 LLM-as-a-Judge 平台；当前 evaluator 是确定性指标；
+- 真实简历数据只在本机，公开仓库不包含。
 
 ## Contributing
 
-欢迎提交 Issue 和 Pull Request。提交前请运行相关后端检查与前端构建。
+欢迎提交 Issue 和 Pull Request。提交前请运行：
+
+```bash
+cd backend && pytest -q
+cd ../frontend && npm run build
+```
 
 ## License
 
