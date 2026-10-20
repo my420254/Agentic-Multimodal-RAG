@@ -115,7 +115,9 @@ Hybrid RAG 问答，展示 Agent 步骤、召回详情与 citations。
 
 业务控制面（用户、API Key、模型、系统提示词、审计日志）+ Langfuse 观测摘要（traces、P95、错误率、tokens、实验入口）；详细 trace 在 Langfuse UI 查看。
 
-![管理后台](docs/assets/admin.jpg)
+![管理后台-用户管理](docs/assets/admin-users.jpg)
+
+![管理后台-观测](docs/assets/admin.jpg)
 
 ## 工作流程
 
@@ -153,7 +155,7 @@ React + TypeScript + Vite + Ant Design
             FastAPI
   ┌─────────────┼──────────────┬──────────────┐
   │             │              │              │
-Auth/KB      Retrieval      Career/Interview  Admin
+Auth/KB      Retrieval      Career/Interview  Admin API
   │             │              │              │
   └──────┬──────┴──────┬───────┴──────┬───────┘
          │             │              │
@@ -162,6 +164,8 @@ Auth/KB      Retrieval      Career/Interview  Admin
          │
     Langfuse (trace / dataset / experiment / prompt)
 ```
+
+> React SPA 同时承载学生端页面和 `/admin` 管理后台；FastAPI 只提供 Admin API（`/api/v1/admin/*`），**没有单独的 Admin 服务器 UI**。
 
 主要组件：
 
@@ -176,7 +180,7 @@ Auth/KB      Retrieval      Career/Interview  Admin
 
 ### 环境要求
 
-- Python 3.10+
+- Python 3.12+（开发环境 3.14；以 `requirements.txt` 锁定的版本为准）
 - Node.js 18+
 - PostgreSQL 16+ 且安装 pgvector
 - Redis
@@ -240,8 +244,10 @@ npm run dev
 
 ### 4. 初始化本地数据（可选）
 
+以下脚本在**仓库根目录**运行，不在 `backend/` 下：
+
 ```bash
-cd backend
+cd /path/to/Agentic-Multimodal-RAG
 python scripts/seed_admin.py          # 管理员账号
 python scripts/seed_demo_users.py     # 演示学生账号
 python scripts/ingest_real_resumes.py # 本地真实简历（PII，不要提交）
@@ -403,10 +409,20 @@ GET /api/v1/admin/observability/langfuse-summary?hours=24
 
 后端用 Langfuse Basic Auth 聚合最近 24h 的 observations（60s 缓存），前端只拿摘要，不暴露 key；详细分析直接跳转 Langfuse Traces / Experiments / Prompts / Datasets。
 
-### 前后端边界
+### 运行时入口与前后端边界
+
+| 入口 | URL | 说明 |
+| :--- | :--- | :--- |
+| 学生端 | `http://localhost:3000` | 简历诊断 / 模拟面试 / 提示词工坊 / 知识库 / 智能对话 |
+| 管理后台 | `http://localhost:3000/admin` | **同一个 React SPA 的 `/admin` 路由**，仅 admin 角色可见 |
+| 后端 API | `http://localhost:8000/docs` | FastAPI Swagger；没有自定义的后端 UI |
+| 指标 | `http://localhost:8000/metrics` | Prometheus 文本指标 |
 
 - React SPA 通过 REST/SSE 调 FastAPI，CORS 使用白名单；
-- Admin 是独立前端路由，业务 API 在 `/api/v1/admin/*`；
+- **后端与前端是两个进程**：前端是 `frontend/` 的 Vite 构建，后端是 `backend/` 的 FastAPI；
+- **Admin 不是独立前端应用**：它是同一个 React SPA 里的 `/admin` 路由，调用 `/api/v1/admin/*`；
+- 后端没有“后台界面”，只有 API、Swagger `/docs`、`/metrics`、`/health`、`/ready`；
+- 如果未来要把 Admin 拆成独立应用，只需复用 `/api/v1/admin/*`，后端不用改；
 - 可观测详情在 Langfuse，Admin 只保留业务控制面和摘要/跳转，不重复造第二个评测 UI。
 
 ### Golden 体检
