@@ -23,6 +23,8 @@ GOLDEN_FILES = [
 
 @pytest.mark.parametrize("path", GOLDEN_FILES, ids=lambda p: p.name)
 def test_golden_files_pass_structural_checks(path):
+    if not path.exists():
+        pytest.skip(f"{path.name} 是本地 PII 数据，CI 不包含")
     golden = json.loads(path.read_text(encoding="utf-8"))
     assert structural_checks(golden) == []
 

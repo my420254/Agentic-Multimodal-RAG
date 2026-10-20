@@ -3,16 +3,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 
-def test_list_knowledge_bases(client: TestClient, enterprise_kb_id: str, auth_headers: dict):
-    """测试获取知识库列表接口"""
+def test_list_knowledge_bases(client: TestClient, auth_headers: dict):
+    """测试获取知识库列表接口（不依赖本地 SRE 种子数据）"""
     assert client.get("/api/v1/knowledge-bases").status_code == 401
     response = client.get("/api/v1/knowledge-bases", headers=auth_headers)
     assert response.status_code == 200
     res_data = response.json()
     assert res_data["code"] == 200
     assert isinstance(res_data["data"], list)
-    kb_ids = [item["id"] for item in res_data["data"]]
-    assert enterprise_kb_id in kb_ids
 
 
 def test_knowledge_base_lifecycle_crud(client: TestClient, auth_headers: dict):

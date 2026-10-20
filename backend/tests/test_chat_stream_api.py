@@ -3,8 +3,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 
-def test_chat_rewrite_api(client: TestClient, auth_headers: dict):
-    """测试问题改写接口（W1 起必须带 access token）"""
+def test_chat_rewrite_api(client: TestClient, auth_headers: dict, monkeypatch):
+    """测试问题改写接口（不依赖真实 LLM Key）"""
+    from app.services.llm import LLMService
+
+    async def fake_rewrite(self, query: str) -> str:
+        return f"{query}（改写）"
+
+    monkeypatch.setattr(LLMService, "rewrite_query", fake_rewrite)
     payload = {"query": "那个 137 报错是什么原因？"}
     response = client.post("/api/v1/chat/rewrite", json=payload, headers=auth_headers)
     assert response.status_code == 200

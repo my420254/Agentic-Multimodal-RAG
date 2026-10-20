@@ -77,5 +77,9 @@ def auth_headers():
 
 @pytest.fixture(scope="session")
 def enterprise_kb_id():
-    """返回生产级企业知识库 ID"""
+    """返回生产级企业知识库 ID；CI 空库没有本地种子数据时跳过集成测试。"""
+    with Session(engine) as session:
+        kb = session.get(KnowledgeBase, "kb_sre_enterprise")
+        if kb is None or kb.chunk_count <= 0:
+            pytest.skip("本地 SRE 知识库未入库；CI 跳过依赖真实种子的集成测试")
     return "kb_sre_enterprise"
