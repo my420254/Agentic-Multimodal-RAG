@@ -11,13 +11,16 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlmodel import Session, func, select
 
+from app.core.config import get_settings
 from app.core.database import get_session
 from app.core.deps import get_current_admin
 from app.core.security import hash_password
+from app.core.tracing import tracer
 from app.models import AgentTrace, ApiKey, AuditLog, CustomModel, KnowledgeBase, ModelType, RequestLog, SystemPrompt, User
 from app.services.audit_service import record_audit
 from app.services.prompt_service import prompt_workshop_service
@@ -29,6 +32,11 @@ router = APIRouter(
     tags=["Admin"],
     dependencies=[Depends(get_current_admin)],
 )
+settings = get_settings()
+
+# Langfuse 摘要按小时窗口缓存，避免 Admin 页面刷新打爆公开 API 限流
+_LF_SUMMARY_CACHE: Dict[str, Any] = {"at": 0.0, "hours": None, "data": None}
+_LF_SUMMARY_TTL = 60.0
 
 VALID_ROLES = {"student", "admin"}
 VALID_STATUS = {"active", "disabled"}
@@ -651,6 +659,92 @@ async def observability_summary(
         "trace_count": int(session.exec(select(func.count()).select_from(AgentTrace)).one()),
         "metrics_endpoint": "/metrics",
     }
+
+
+async def _fetch_langfuse_summary(hours: int) -> Dict[str, Any]:
+    """聚合 Langfuse 最近 N 小时的 trace / latency / error / token。"""
+    now = datetime.now(timezone.utc)
+    params = {
+        "fromStartTime": (now - timedelta(hours=hours)).isoformat(),
+        "toStartTime": now.isoformat(),
+        "fields": "core,basic,model,usage,metadata",
+        "limit": 1000,
+    }
+    async with httpx.AsyncClient(timeout=10.0, trust_env=True) as client:
+        response = await client.get(
+            f"{settings.LANGFUSE_HOST.rstrip('/')}/api/public/v2/observations",
+            params=params,
+            auth=(settings.LANGFUSE_PUBLIC_KEY, settings.LANGFUSE_SECRET_KEY),
+        )
+        response.raise_for_status()
+        rows = response.json().get("data", [])
+
+    roots = [row for row in rows if not row.get("parentObservationId")]
+    chat_roots = [row for row in roots if row.get("name") == "chat.request"]
+    experiment_roots = [row for row in roots if row.get("name") == "experiment-item-run"]
+    generations = [row for row in rows if row.get("type") == "GENERATION"]
+
+    latencies = sorted(
+        float(row["latency"]) for row in chat_roots if row.get("latency") is not None
+    )
+    p95 = latencies[max(0, int(len(latencies) * 0.95) - 1)] if latencies else None
+
+    input_tokens = output_tokens = 0
+    for row in generations:
+        usage = row.get("usageDetails") or row.get("usage") or {}
+        input_tokens += int(usage.get("input") or usage.get("inputUsage") or 0)
+        output_tokens += int(usage.get("output") or usage.get("outputUsage") or 0)
+
+    errors = [row for row in chat_roots if row.get("level") == "ERROR"]
+    project_id = next((row.get("projectId") for row in rows if row.get("projectId")), None)
+    host = settings.LANGFUSE_HOST.rstrip("/")
+    links = {}
+    if project_id:
+        links = {
+            "traces": f"{host}/project/{project_id}/traces",
+            "experiments": f"{host}/project/{project_id}/experiments",
+            "prompts": f"{host}/project/{project_id}/prompts",
+            "datasets": f"{host}/project/{project_id}/datasets",
+        }
+
+    return {
+        "hours": hours,
+        "trace_count": len({row.get("traceId") for row in chat_roots}),
+        "experiment_items": len({row.get("traceId") for row in experiment_roots}),
+        "error_count": len(errors),
+        "error_rate": round(len(errors) / len(chat_roots), 4) if chat_roots else 0.0,
+        "p95_latency_ms": round(p95 * 1000, 2) if p95 is not None else None,
+        "tokens_input": input_tokens,
+        "tokens_output": output_tokens,
+        "truncated": len(rows) >= 1000,
+        "links": links,
+    }
+
+
+@router.get("/observability/langfuse-summary")
+async def langfuse_observability_summary(
+    hours: int = Query(default=24, ge=1, le=168),
+    admin: User = Depends(get_current_admin),
+):
+    """Admin 只展示 Langfuse 聚合摘要；详细 trace 走 Langfuse UI。"""
+    if not tracer.enabled:
+        return {"enabled": False, "message": "Langfuse 未配置；设置 LANGFUSE_PUBLIC_KEY/SECRET_KEY 后启用"}
+
+    now = time.monotonic()
+    if (
+        _LF_SUMMARY_CACHE["data"] is not None
+        and _LF_SUMMARY_CACHE["hours"] == hours
+        and now - _LF_SUMMARY_CACHE["at"] < _LF_SUMMARY_TTL
+    ):
+        return {"enabled": True, "available": True, **_LF_SUMMARY_CACHE["data"]}
+
+    try:
+        data = await _fetch_langfuse_summary(hours)
+    except Exception as exc:
+        return {"enabled": True, "available": False, "error": type(exc).__name__}
+
+    _LF_SUMMARY_CACHE.update({"at": now, "hours": hours, "data": data})
+    return {"enabled": True, "available": True, **data}
 
 
 # ==================== 审计 ====================

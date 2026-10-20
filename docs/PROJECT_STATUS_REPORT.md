@@ -152,7 +152,7 @@ FastAPI (8000)
 - 模拟面试 grounding：**10/10**；
 - Agent 模式（10 条 SRE 问题，通用 smoke，不是求职域主评测）：**10/10** 关键词命中 + citations 非空 + 无 tool_error；
 - 上传 → 解析 → 向量化 → 提问 → 引用：**PASS**；
-- 后端：**126 passed**（新增 34 条 golden/标准指标/tracing/Langfuse/prompt/安全/匹配封顶测试）；
+- 后端：**127 passed**（新增 35 条 golden/标准指标/tracing/Langfuse/prompt/安全/匹配封顶测试）；
 - 前端：`npm run build` 通过（约 9.4s）。
 
 ### 4.5 延迟
@@ -164,7 +164,7 @@ FastAPI (8000)
 
 ## 5. 测试与质量
 
-- 25 个测试文件，126 条测试；
+- 25 个测试文件，127 条测试；
 - 覆盖：auth/隔离、KB/owner、admin、trace、Agent workflow、工具治理、检索/rerank/缓存、BM25、记忆、prompt、golden eval、chat SSE；
 - 前端构建通过；
 - 未覆盖/薄弱：
@@ -192,7 +192,7 @@ FastAPI (8000)
 - **实测**：`chat:read` key 访问 KB list → 403；`kb:read` key → 200；`/ready` 返回 `postgres/redis/llm=ok`；CORS 未知 Origin → 400；
 - **CI**：`.github/workflows/ci.yml`，后端用 pgvector + Redis service 跑 pytest，前端跑 `npm ci && npm run build`；
 - **Docker**：`docker-compose.yml` + `backend/Dockerfile` + `frontend/Dockerfile`，见 §6.7；
-- 测试：**126 passed**。
+- 测试：**127 passed**。
 
 ## 6. 运行手册
 
@@ -426,7 +426,7 @@ LANGFUSE_HOST=https://cloud.langfuse.com
 TRACE_CONTENT_MODE=redacted   # metadata | redacted | full
 ```
 
-验收前状态：没有 key 时 `tracer.enabled=false`，所有 span 为 no-op，聊天和 126 条测试照常通过；本地 `agent_traces` 继续写。
+验收前状态：没有 key 时 `tracer.enabled=false`，所有 span 为 no-op，聊天和 127 条测试照常通过；本地 `agent_traces` 继续写。
 
 **Datasets / Experiments（2026-10-19，Cloud Hobby）**
 
@@ -520,7 +520,7 @@ curl -s http://127.0.0.1:8000/ready   # PG / Redis / LLM 依赖状态
 ```bash
 git log --oneline -8
 git status --short
-python3 -m pytest tests -q          # 126 passed
+python3 -m pytest tests -q          # 127 passed
 npm run build                       # 通过
 curl http://127.0.0.1:8000/health    # {"status":"ok"}
 curl http://127.0.0.1:8000/ready     # {"status":"ok","checks":{...}}

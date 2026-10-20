@@ -62,6 +62,22 @@ def test_student_forbidden_admin_forbidden(client, data):
     assert client.get("/api/v1/admin/overview", headers=_h(data["admin_token"])).status_code == 200
 
 
+def test_langfuse_summary_is_admin_only_and_noop_when_disabled(client, data):
+    assert client.get(
+        "/api/v1/admin/observability/langfuse-summary",
+        headers=_h(data["student_token"]),
+    ).status_code == 403
+
+    response = client.get(
+        "/api/v1/admin/observability/langfuse-summary",
+        headers=_h(data["admin_token"]),
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["enabled"] is False
+    assert "Langfuse" in body["message"]
+
+
 def test_admin_create_user(client, data):
     sid = f"created_{uuid.uuid4().hex[:6]}"
     resp = client.post(

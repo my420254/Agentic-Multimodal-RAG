@@ -4,7 +4,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import {
-  Alert, Button, Card, Col, Form, Input, InputNumber, Modal, Popconfirm,
+  Alert, Button, Card, Col, Collapse, Divider, Form, Input, InputNumber, Modal, Popconfirm,
   Row, Select, Space, Statistic, Switch, Table, Tabs, Tag, Typography, message,
 } from 'antd';
 import { PlusOutlined, ReloadOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
@@ -26,6 +26,7 @@ const Admin: React.FC = () => {
   const [prompts, setPrompts] = useState<any[]>([]);
   const [audits, setAudits] = useState<any[]>([]);
   const [obs, setObs] = useState<any>({});
+  const [lfSummary, setLfSummary] = useState<any>({ enabled: false });
   const [requestLogs, setRequestLogs] = useState<any[]>([]);
   const [traces, setTraces] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -51,7 +52,7 @@ const Admin: React.FC = () => {
   const load = async () => {
     setLoading(true);
     try {
-      const [o, u, k, m, p, a, s, rl, tr] = await Promise.all([
+      const [o, u, k, m, p, a, s, rl, tr, lf] = await Promise.all([
         api.getAdminOverview(),
         api.getAdminUsers({ page: 1, page_size: 100 }),
         api.getAdminApiKeys({ page: 1, page_size: 100 }),
@@ -61,10 +62,12 @@ const Admin: React.FC = () => {
         api.getAdminObservabilitySummary(),
         api.getAdminRequestLogs({ page: 1, page_size: 50 }),
         api.getAdminTraces({ page: 1, page_size: 50 }),
+        api.getAdminLangfuseSummary().catch(() => ({ enabled: false })),
       ]);
       setOverview(o || {}); setUsers(u?.items || []); setKeys(k?.items || []);
       setModels(m?.items || []); setPrompts(p?.items || []); setAudits(a?.items || []);
       setObs(s || {}); setRequestLogs(rl?.items || []); setTraces(tr?.items || []);
+      setLfSummary(lf || { enabled: false });
     } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
@@ -259,20 +262,69 @@ const Admin: React.FC = () => {
           { key: 'audit', label: '审计日志', children: <Table rowKey="id" size="small" columns={auditCols} dataSource={audits} pagination={false} /> },
           { key: 'observability', label: '观测', children: (
             <div>
-              <Row gutter={12} style={{ marginBottom: 12 }}>
-                <Col span={6}><Card size="small"><Statistic title="请求总数" value={Number(obs.total_requests || 0)} /></Card></Col>
-                <Col span={6}><Card size="small"><Statistic title="错误数" value={Number(obs.error_requests || 0)} valueStyle={{ color: '#cf1322' }} /></Card></Col>
-                <Col span={6}><Card size="small"><Statistic title="错误率" value={Number((obs.error_rate || 0) * 100).toFixed(2)} suffix="%" /></Card></Col>
-                <Col span={6}><Card size="small"><Statistic title="平均耗时" value={Number(obs.avg_latency_ms || 0).toFixed(1)} suffix="ms" /></Card></Col>
-              </Row>
-              <Space style={{ marginBottom: 12 }}>
-                <Button onClick={() => window.open('http://127.0.0.1:8000/metrics', '_blank')}>打开 /metrics</Button>
-                <Text type="secondary">Prometheus 文本指标；请求日志不含 query/response 正文。</Text>
-              </Space>
-              <Table rowKey="id" size="small" columns={requestCols} dataSource={requestLogs} pagination={false} />
-              <Title level={5} style={{ marginTop: 16 }}>Agent Trace（query/answer 预览，仅 admin）</Title>
-              <Text type="secondary">trace_id 由 /chat/completions 生成，记录 TTFT、总耗时、引用、工具步骤与错误。</Text>
-              <Table rowKey="trace_id" size="small" columns={traceCols} dataSource={traces} pagination={false} style={{ marginTop: 8 }} />
+              {lfSummary?.enabled !== true ? (
+                <Alert
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 12 }}
+                  message="Langfuse 未配置"
+                  description="设置 LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY 后，这里显示 Agent/RAG trace 摘要；详细 trace、dataset、experiment、prompt 都在 Langfuse UI 查看。"
+                />
+              ) : lfSummary?.available === false ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  style={{ marginBottom: 12 }}
+                  message="Langfuse 暂时不可用"
+                  description={`错误类型：${lfSummary?.error || 'unknown'}；下方本地 fallback 仍可用。`}
+                />
+              ) : (
+                <>
+                  <Space style={{ marginBottom: 12 }} wrap>
+                    <Tag color="blue">Langfuse · 最近 {lfSummary?.hours || 24} 小时</Tag>
+                    {lfSummary?.truncated && <Tag color="orange">结果已截断（≥1000 observations）</Tag>}
+                    <Text type="secondary">P95 只统计 chat.request；tokens 含实验与聊天。</Text>
+                  </Space>
+                  <Row gutter={12} style={{ marginBottom: 12 }}>
+                    <Col span={6}><Card size="small"><Statistic title="Chat traces" value={Number(lfSummary?.trace_count || 0)} /></Card></Col>
+                    <Col span={6}><Card size="small"><Statistic title="P95 延迟" value={lfSummary?.p95_latency_ms ?? '-'} suffix="ms" /></Card></Col>
+                    <Col span={6}><Card size="small"><Statistic title="错误率" value={Number((lfSummary?.error_rate || 0) * 100).toFixed(2)} suffix="%" valueStyle={{ color: (lfSummary?.error_rate || 0) > 0 ? '#cf1322' : '#3f8600' }} /></Card></Col>
+                    <Col span={6}><Card size="small"><Statistic title="Tokens (in / out)" value={`${lfSummary?.tokens_input || 0} / ${lfSummary?.tokens_output || 0}`} /></Card></Col>
+                  </Row>
+                  <Space style={{ marginBottom: 16 }} wrap>
+                    {lfSummary?.links?.traces && <Button onClick={() => window.open(lfSummary.links.traces, '_blank')}>Langfuse Traces</Button>}
+                    {lfSummary?.links?.experiments && <Button onClick={() => window.open(lfSummary.links.experiments, '_blank')}>Experiments</Button>}
+                    {lfSummary?.links?.prompts && <Button onClick={() => window.open(lfSummary.links.prompts, '_blank')}>Prompts</Button>}
+                    {lfSummary?.links?.datasets && <Button onClick={() => window.open(lfSummary.links.datasets, '_blank')}>Datasets</Button>}
+                  </Space>
+                </>
+              )}
+
+              <Divider orientation="left">本地 fallback / 基础设施指标</Divider>
+              <Collapse
+                items={[{
+                  key: 'local-fallback',
+                  label: 'request_logs / agent_traces / Prometheus（Langfuse 不可用时）',
+                  children: (
+                    <div>
+                      <Row gutter={12} style={{ marginBottom: 12 }}>
+                        <Col span={6}><Card size="small"><Statistic title="请求总数" value={Number(obs.total_requests || 0)} /></Card></Col>
+                        <Col span={6}><Card size="small"><Statistic title="错误数" value={Number(obs.error_requests || 0)} valueStyle={{ color: '#cf1322' }} /></Card></Col>
+                        <Col span={6}><Card size="small"><Statistic title="错误率" value={Number((obs.error_rate || 0) * 100).toFixed(2)} suffix="%" /></Card></Col>
+                        <Col span={6}><Card size="small"><Statistic title="平均耗时" value={Number(obs.avg_latency_ms || 0).toFixed(1)} suffix="ms" /></Card></Col>
+                      </Row>
+                      <Space style={{ marginBottom: 12 }}>
+                        <Button onClick={() => window.open('http://127.0.0.1:8000/metrics', '_blank')}>打开 /metrics</Button>
+                        <Text type="secondary">Prometheus 文本指标；请求日志不含 query/response 正文。</Text>
+                      </Space>
+                      <Table rowKey="id" size="small" columns={requestCols} dataSource={requestLogs} pagination={false} />
+                      <Title level={5} style={{ marginTop: 16 }}>Agent Trace（query/answer 预览，仅 admin）</Title>
+                      <Text type="secondary">trace_id 由 /chat/completions 生成，记录 TTFT、总耗时、引用、工具步骤与错误。</Text>
+                      <Table rowKey="trace_id" size="small" columns={traceCols} dataSource={traces} pagination={false} style={{ marginTop: 8 }} />
+                    </div>
+                  ),
+                }]}
+              />
             </div>
           ) },
         ]} />

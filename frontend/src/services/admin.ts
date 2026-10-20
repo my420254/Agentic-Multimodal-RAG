@@ -58,6 +58,9 @@ export const getAdminRequestLogs = (params?: Record<string, any>): Promise<any> 
 export const getAdminObservabilitySummary = (): Promise<any> =>
   request.get('/admin/observability/summary');
 
+export const getAdminLangfuseSummary = (hours = 24): Promise<any> =>
+  request.get('/admin/observability/langfuse-summary', { params: { hours } });
+
 export const getAdminAuditLogs = (params?: Record<string, any>): Promise<any> =>
   request.get('/admin/audit-logs', { params });
 

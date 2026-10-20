@@ -113,7 +113,7 @@ Hybrid RAG 问答，展示 Agent 步骤、召回详情与 citations。
 
 ### 管理后台
 
-用户、API Key、模型、系统提示词、审计日志与观测。
+业务控制面（用户、API Key、模型、系统提示词、审计日志）+ Langfuse 观测摘要（traces、P95、错误率、tokens、实验入口）；详细 trace 在 Langfuse UI 查看。
 
 ![管理后台](docs/assets/admin.jpg)
 
@@ -269,7 +269,7 @@ curl http://127.0.0.1:8000/ready
 | 真实简历检索 | 42 条 golden、54 chunks | vector `evidence_all@3 = 92.31%`，`RR@3 = 0.7094` |
 | 模拟面试 grounding | 10 条真实简历 × 岗位 | **10/10** 通过 |
 | 求职匹配 / 反欺诈 | `career_demo_v1` 5 条合成简历 | 4 个 evaluator 均 **1.000** |
-| 后端测试 | 126 条 | **126 passed**（CI 121 passed + 5 skipped） |
+| 后端测试 | 127 条 | **127 passed**（CI 122 passed + 5 skipped） |
 
 > `evidence_all@3` 是检索命中，不是回答准确率；延迟是单条样本，不是 P95。  
 > Hybrid 没有稳定超过纯向量：BM25 更快、向量更准，hybrid 作为可调策略保留。
@@ -291,6 +291,31 @@ python backend/benchmark/langfuse_agent_dataset.py --run-experiment
 - Dataset / Experiment：`career_demo_v1` / `career_quality_baseline`；
 - Prompt：`agent.intent` / `agent.system` / `agent.grading` / `agent.answer` / `agent.chat`；
 - 未配置 key 时自动 no-op，本地 `agent_traces` 继续工作。
+
+### Admin 与 Langfuse 的分工
+
+| 能力 | Admin | Langfuse |
+| :--- | :--- | :--- |
+| 用户 / API Key / 模型 / 审计 | ✅ 业务控制面 | ❌ |
+| trace / span / tool / retrieval / LLM 延迟 | 24h 摘要 | ✅ 详情与过滤 |
+| P95 / 错误率 / tokens | 摘要卡片 | ✅ 按 trace/实验对比 |
+| Dataset / Experiment / Score | 跳转入口 | ✅ 数据集与实验 |
+| Prompt 版本 / 回滚 | 用户级覆盖 | ✅ 全局版本与 label |
+| RAG Hit@K / MRR / citation | 自研 evaluator 计算 | 展示 score，不原生计算 |
+
+Admin 的“观测”tab 调用：
+
+```text
+GET /api/v1/admin/observability/langfuse-summary?hours=24
+```
+
+后端用 Langfuse Basic Auth 聚合最近 24h 的 observations（60s 缓存），前端只拿摘要，不暴露 key；详细分析直接跳转 Langfuse Traces / Experiments / Prompts / Datasets。
+
+### 前后端边界
+
+- React SPA 通过 REST/SSE 调 FastAPI，CORS 使用白名单；
+- Admin 是独立前端路由，业务 API 在 `/api/v1/admin/*`；
+- 可观测详情在 Langfuse，Admin 只保留业务控制面和摘要/跳转，不重复造第二个评测 UI。
 
 ### Golden 体检
 
@@ -326,7 +351,7 @@ backend/app/
 ├── tasks/                   Celery（可选）
 ├── benchmark/               42/10/10 golden、标准指标、Langfuse dataset/experiment
 ├── alembic/                 baseline migration
-└── tests/                   126 条测试
+└── tests/                   127 条测试
 
 frontend/src/
 ├── pages/CareerCenter/      简历诊断 / 模拟面试 / 提示词工坊
