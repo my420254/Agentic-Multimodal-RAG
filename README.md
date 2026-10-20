@@ -10,7 +10,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/React-TypeScript-149ECA?logo=react&logoColor=white)](https://react.dev/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-Agent-1C3C3C)](https://github.com/langchain-ai/langgraph)
-[![CI](https://github.com/futureYYY/Agentic-Multimodal-RAG/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/futureYYY/Agentic-Multimodal-RAG/actions/workflows/ci.yml)
+[![CI](https://github.com/my420254/Agentic-Multimodal-RAG/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/my420254/Agentic-Multimodal-RAG/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-MIT-black.svg)](LICENSE)
 
 [功能亮点](#功能亮点) · [界面预览](#界面预览) · [工作流程](#工作流程) · [快速开始](#快速开始)
@@ -159,7 +159,7 @@ Parser -> Chunk -> Index    Intent -> Retrieve -> Observe -> Retry
 ### 1. 克隆项目
 
 ```bash
-git clone https://github.com/futureYYY/Agentic-Multimodal-RAG.git
+git clone https://github.com/my420254/Agentic-Multimodal-RAG.git
 cd Agentic-Multimodal-RAG
 ```
 
