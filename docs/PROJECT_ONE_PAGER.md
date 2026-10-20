@@ -66,7 +66,7 @@ PostgreSQL + pgvector / Redis / DeepSeek / SiliconFlow
 - 10 条面试 grounding：10/10 通过
 - 5 条求职域合成用例（`career_demo_v1`）：匹配 + 反欺诈 4 个 evaluator 均为 1.0
 - 跨领域简历匹配修复：硬技能覆盖率 <34% 时封顶 LOW，避免“学前教育简历 vs Agent 岗”被抬到 MODERATE
-- 后端测试：127 passed
+- 后端测试：128 passed
 - 延迟：单条样本，**不是 P95**
 
 ## 5. 生产化与安全

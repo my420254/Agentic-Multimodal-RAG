@@ -56,5 +56,14 @@ services:
     ports:
       - "3000:80"
 
+  admin-frontend:
+    build:
+      context: .
+      dockerfile: admin-frontend/Dockerfile
+    depends_on:
+      - backend
+    ports:
+      - "3001:80"
+
 volumes:
   pgdata:

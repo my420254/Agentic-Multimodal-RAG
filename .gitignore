@@ -51,3 +51,6 @@ backend/benchmark/agent_eval.json
 
 # 本地真实简历文件名映射（含 PII，不提交）
 backend/benchmark/personal_kb_files.local.json
+
+admin-frontend/node_modules/
+admin-frontend/dist/

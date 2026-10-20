@@ -5,7 +5,8 @@
 - `db`：`pgvector/pgvector:pg16`
 - `redis`：`redis:7`
 - `backend`：FastAPI + Alembic（启动时 `AUTO_MIGRATE=true` 自动 upgrade）
-- `frontend`：Vite 构建产物 + Nginx；`/api/` 反向代理到 backend，SSE 关闭 buffering
+- `frontend`：学生端 Vite 构建产物 + Nginx；`/api/` 反向代理到 backend，SSE 关闭 buffering
+- `admin-frontend`：独立观测后台（3001），复用 `frontend/src/pages/Admin` 源码，单独构建/部署
 
 ## 启动
 
@@ -25,9 +26,11 @@ docker compose up -d
 curl http://127.0.0.1:8000/ready
 ```
 
-前端：`http://127.0.0.1:3000`  
-后端：`http://127.0.0.1:8000`  
-Admin：`http://127.0.0.1:3000/admin`
+学生端：`http://127.0.0.1:3000`  
+观测后台：`http://127.0.0.1:3001`  
+后端：`http://127.0.0.1:8000`
+
+> 观测后台是独立的 `admin-frontend` 服务，不在学生端导航中，也没有 `/admin` 路由。
 
 ## 迁移
 
@@ -53,7 +56,7 @@ docker compose run --rm backend alembic upgrade head
    compose 会直接报错，这是故意的；不要使用默认密钥。
 
 3. **前端刷新 404**  
-   Nginx 已配置 `try_files $uri $uri/ /index.html`，如果仍 404，确认使用的是本仓库的 `frontend/nginx.conf`。
+   Nginx 已配置 `try_files $uri $uri/ /index.html`，如果仍 404，确认使用的是本仓库的 `frontend/nginx.conf` 或 `admin-frontend/nginx.conf`。
 
 4. **SSE 不流式**  
    `nginx.conf` 已设置 `proxy_buffering off`；如果前面还有一层网关，也需要关闭 buffering。

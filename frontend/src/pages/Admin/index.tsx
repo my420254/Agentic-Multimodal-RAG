@@ -18,7 +18,11 @@ const copy = async (v: string) => {
   catch { message.warning('浏览器未授权剪贴板，请手动复制'); }
 };
 
-const Admin: React.FC = () => {
+interface AdminProps {
+  defaultTab?: string;
+}
+
+const Admin: React.FC<AdminProps> = ({ defaultTab = 'users' }) => {
   const [overview, setOverview] = useState<any>({});
   const [users, setUsers] = useState<any[]>([]);
   const [keys, setKeys] = useState<any[]>([]);
@@ -234,7 +238,7 @@ const Admin: React.FC = () => {
           ))}
       </Row>
       <Card>
-        <Tabs items={[
+        <Tabs defaultActiveKey={defaultTab} items={[
           { key: 'users', label: '用户管理', children: (
             <div>
               <Button type="primary" icon={<PlusOutlined />} style={{ marginBottom: 12 }} onClick={() => setUserOpen(true)}>新增用户</Button>

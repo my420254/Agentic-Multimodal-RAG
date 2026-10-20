@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     # 逗号分隔；不要在生产使用 *。前端默认 3000，Vite 默认 5173。
     CORS_ORIGINS: str = (
         "http://127.0.0.1:3000,http://localhost:3000,"
+        "http://127.0.0.1:3001,http://localhost:3001,"
         "http://127.0.0.1:5173,http://localhost:5173"
     )
     # /ready：LLM 不可用是否视为未就绪；默认只标记 degraded

@@ -70,7 +70,7 @@
 | **提示词工坊** `/career/prompts` | 用户级面试官/简历医生提示词覆盖 |
 | **知识库** `/kb` | 上传、解析、切块、向量化、召回测试 |
 | **智能对话** `/chat` | Hybrid RAG 问答 + Agent 思考步骤 + citations |
-| **管理后台** `/admin` | 用户、API Key、模型、系统提示词、审计、观测 |
+| **观测后台** `http://localhost:3001` | 独立 admin-frontend：用户、API Key、模型、系统提示词、审计、Langfuse 观测 |
 
 ### 登录
 
@@ -111,13 +111,20 @@ Hybrid RAG 问答，展示 Agent 步骤、召回详情与 citations。
 
 ![智能对话](docs/assets/chat.jpg)
 
-### 管理后台
+### 独立观测后台（admin-frontend，3001）
 
-业务控制面（用户、API Key、模型、系统提示词、审计日志）+ Langfuse 观测摘要（traces、P95、错误率、tokens、实验入口）；详细 trace 在 Langfuse UI 查看。
+管理后台是**独立的前端应用**，不在学生端 `frontend/` 里，也不在学生端导航中。它复用 Admin 页面源码，但独立构建、独立部署：
 
-![管理后台-用户管理](docs/assets/admin-users.jpg)
+- 登录页：只允许 `admin` 角色；
+- 用户管理 / API Key / 模型 / 系统提示词 / 审计日志；
+- 默认进入“观测”：Langfuse traces、P95、错误率、tokens、Experiments/Prompts/Datasets 跳转；
+- 本地 fallback：request_logs / agent_traces / Prometheus。
 
-![管理后台-观测](docs/assets/admin.jpg)
+![观测后台登录](docs/assets/admin-login.jpg)
+
+![观测后台-用户管理](docs/assets/admin-users.jpg)
+
+![观测后台-Langfuse 观测](docs/assets/admin.jpg)
 
 ## 工作流程
 
@@ -149,10 +156,11 @@ flowchart LR
 ## 技术架构
 
 ```text
-React + TypeScript + Vite + Ant Design
-                |
-                v
-            FastAPI
+Student SPA (frontend/, 3000)      Admin SPA (admin-frontend/, 3001)
+                \                    /
+                 \                  /
+                  v                v
+                       FastAPI
   ┌─────────────┼──────────────┬──────────────┐
   │             │              │              │
 Auth/KB      Retrieval      Career/Interview  Admin API
@@ -165,7 +173,7 @@ Auth/KB      Retrieval      Career/Interview  Admin API
     Langfuse (trace / dataset / experiment / prompt)
 ```
 
-> React SPA 同时承载学生端页面和 `/admin` 管理后台；FastAPI 只提供 Admin API（`/api/v1/admin/*`），**没有单独的 Admin 服务器 UI**。
+> 学生端（`frontend/`）和观测后台（`admin-frontend/`）是两个独立的 Vite 应用；FastAPI 只提供 API（含 `/api/v1/admin/*`），**没有单独的 Admin 服务器 UI**。
 
 主要组件：
 
@@ -232,7 +240,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 alembic upgrade head
 ```
 
-### 3. 启动前端
+### 3. 启动学生端
 
 ```bash
 cd frontend
@@ -242,7 +250,18 @@ npm run dev
 
 访问 `http://localhost:3000`，登录后默认进入 **简历诊断**。
 
-### 4. 初始化本地数据（可选）
+### 4. 启动观测后台（可选）
+
+```bash
+cd admin-frontend
+npm ci
+npm run dev -- --host 127.0.0.1 --port 3001
+```
+
+访问 `http://localhost:3001`，使用 `admin` 账号登录；默认进入 **观测** 页。  
+观测后台是独立应用，不在学生端导航中，也没有 `/admin` 路由。
+
+### 5. 初始化本地数据（可选）
 
 以下脚本在**仓库根目录**运行，不在 `backend/` 下：
 
@@ -254,7 +273,7 @@ python scripts/ingest_real_resumes.py # 本地真实简历（PII，不要提交�
 python scripts/sync_pgvector.py       # 同步向量
 ```
 
-### 5. Docker Compose（可选）
+### 6. Docker Compose（可选）
 
 ```bash
 export JWT_SECRET="$(python3 -c 'import secrets;print(secrets.token_urlsafe(48))')"
@@ -263,7 +282,7 @@ docker compose up -d
 curl http://127.0.0.1:8000/ready
 ```
 
-前端 `http://127.0.0.1:3000`，后端 `http://127.0.0.1:8000`。  
+学生端 `http://127.0.0.1:3000`，观测后台 `http://127.0.0.1:3001`，后端 `http://127.0.0.1:8000`。  
 使用宿主机 Ollama 时，把 `LLM_BASE_URL` / `EMBEDDING_BASE_URL` 改为 `http://host.docker.internal:11434/v1`。详见 [`docs/DOCKER.md`](docs/DOCKER.md)。
 
 ## 评测与可观测
@@ -370,7 +389,7 @@ production 默认 `k1=1.5, b=0.75`；`k1=2.0, b=0.9` 的权重排序更好，但
 - 延迟包含 embedding 网络调用，P95 来自同一批 39 条样本，不是生产压测；
 - Agent 10 条是 SRE smoke，不是求职域主评测；求职域主评测是 42 条简历检索 + 10 条模拟面试 grounding + `career_demo_v1`；
 - 没有 LLM-as-a-Judge，也没有量化 hallucination rate；
-- 后端测试：**127 passed**（CI 122 passed + 5 skipped）。
+- 后端测试：**128 passed**（CI 123 passed + 5 skipped）。
 
 ### Langfuse
 
@@ -413,17 +432,18 @@ GET /api/v1/admin/observability/langfuse-summary?hours=24
 
 | 入口 | URL | 说明 |
 | :--- | :--- | :--- |
-| 学生端 | `http://localhost:3000` | 简历诊断 / 模拟面试 / 提示词工坊 / 知识库 / 智能对话 |
-| 管理后台 | `http://localhost:3000/admin` | **同一个 React SPA 的 `/admin` 路由**，仅 admin 角色可见 |
+| 学生端 | `http://localhost:3000` | `frontend/`：简历诊断 / 模拟面试 / 提示词工坊 / 知识库 / 智能对话 |
+| 观测后台 | `http://localhost:3001` | `admin-frontend/`：独立 Vite 应用，仅 admin 角色可登录 |
 | 后端 API | `http://localhost:8000/docs` | FastAPI Swagger；没有自定义的后端 UI |
 | 指标 | `http://localhost:8000/metrics` | Prometheus 文本指标 |
 
-- React SPA 通过 REST/SSE 调 FastAPI，CORS 使用白名单；
-- **后端与前端是两个进程**：前端是 `frontend/` 的 Vite 构建，后端是 `backend/` 的 FastAPI；
-- **Admin 不是独立前端应用**：它是同一个 React SPA 里的 `/admin` 路由，调用 `/api/v1/admin/*`；
+- 两个前端都通过 REST/SSE 调同一个 FastAPI，CORS 白名单包含 3000/3001；
+- **学生端与观测后台是两个独立构建、独立部署的前端**；
+- 学生端没有 `/admin` 路由，也没有管理后台入口；
+- 观测后台默认进入“观测”页，查看 Langfuse 摘要和本地 fallback；
 - 后端没有“后台界面”，只有 API、Swagger `/docs`、`/metrics`、`/health`、`/ready`；
-- 如果未来要把 Admin 拆成独立应用，只需复用 `/api/v1/admin/*`，后端不用改；
-- 可观测详情在 Langfuse，Admin 只保留业务控制面和摘要/跳转，不重复造第二个评测 UI。
+- 观测后台复用 `frontend/src/pages/Admin` 的页面源码，但打包产物和部署端口独立；
+- 可观测详情在 Langfuse，后台只保留业务控制面和摘要/跳转，不重复造第二个评测 UI。
 
 ### Golden 体检
 
@@ -459,7 +479,7 @@ backend/app/
 ├── tasks/                   Celery（可选）
 ├── benchmark/               42/10/10 golden、标准指标、Langfuse dataset/experiment
 ├── alembic/                 baseline migration
-└── tests/                   127 条测试
+└── tests/                   128 条测试
 
 frontend/src/
 ├── pages/CareerCenter/      简历诊断 / 模拟面试 / 提示词工坊
@@ -467,6 +487,13 @@ frontend/src/
 ├── pages/Chat/              流式问答 + Agent 步骤 + citations
 ├── pages/Admin/             用户 / API Key / 模型 / Prompt / 审计 / 观测
 └── services/                API 客户端
+
+admin-frontend/
+├── src/AdminLogin.tsx       管理员登录（仅 admin）
+├── src/App.tsx              观测后台布局 + 复用 pages/Admin
+├── vite.config.ts           3001 端口，@ 指向 ../frontend/src
+├── nginx.conf               /api、/static 反代到 backend
+└── Dockerfile               独立 admin 镜像
 ```
 
 ## 已知边界
