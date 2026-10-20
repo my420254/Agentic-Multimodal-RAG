@@ -2,16 +2,16 @@
 
 > 仓库：`/home/yang/Agentic-Multimodal-RAG`  
 > 盘点时间：2026-10-19  
-> 当前 commit：`44083db feat(observability): add request-level agent traces`  
-> 工作区：clean；后端 `http://127.0.0.1:8000` 健康；前端 `http://127.0.0.1:3000` 可启动。  
+> 当前 commit：`301aa58 docs: add current project handoff report`  
+> 工作区：有未提交改动（golden 修复、标准指标、Langfuse tracing 骨架）；后端 `http://127.0.0.1:8000` 健康；前端 `http://127.0.0.1:3000` 可启动。  
 > **给接手人：先读本报告。`docs/HANDOFF.md` 是 W1 鉴权时期的历史任务书，不是当前状态，不要按它从“加鉴权”开始做。**
 
 ---
 
 ## 0. 一句话结论
 
-这是一个**可演示、可评测、可运营的高校求职 RAG/Agent 应用**：RAG、模拟面试、多租户、管理后台、Prometheus、请求日志、本地 Agent Trace 都已经落地；  
-但它**不是生产级 Agent 平台**：没有 Langfuse、没有多 Agent/Checkpoint/HITL/MCP、没有 CI/压测/Grafana，API Key scope 只强制了 `admin:*`。
+这是一个**可演示、可评测、可运营的高校求职 RAG/Agent 应用**：RAG、模拟面试、多租户、管理后台、Prometheus、请求日志、Langfuse trace/dataset/experiment/prompt、API Key scope、`/ready` 都已经落地；  
+但它**不是生产级 Agent 平台**：没有 CI/压测/Grafana/Alembic/容器化，多租户仍是 API 层而不是 PG RLS，也没有多 Agent/Checkpoint/HITL/MCP。
 
 **最重要的架构结论：**
 
@@ -102,8 +102,8 @@ FastAPI (8000)
 | 系统提示词 | 完成（自研） | 版本、草稿、发布、回滚；优先级 用户覆盖 > 全局 active > 代码默认 |
 | Prometheus | 完成 | `/metrics`；HTTP/检索指标 |
 | 请求日志 | 完成 | `request_logs`，不含 query/response 正文 |
-| Agent Trace | 完成（本地版） | `agent_traces`，`X-Trace-Id`，Admin 可查；不是 Langfuse |
-| RAG/Agent 评测 | 完成（脚本） | 42 条 golden、10 grounding、10 agent；无评测平台 UI |
+| Agent Trace | 完成（本地 + Langfuse 可选） | 本地 `agent_traces` 保留；Langfuse SDK 5.0.2 已接入 root/tool/retrieval/rerank/LLM span；无 key 自动 no-op |
+| RAG/Agent 评测 | 完成（脚本） | 42 条真实简历 golden + 38 条个人材料 golden、10 grounding、10 agent；标准指标走 `ir_measures`，无评测平台 UI |
 | 前端 | 完成 | 登录、KB、聊天、求职中心、面试、管理后台；构建通过 |
 
 ---
@@ -125,13 +125,16 @@ FastAPI (8000)
 
 ### 4.2 检索（42 条真实简历 golden）
 
-| 模式 | evidence_all@3 | evidence_any@3 | MRR | 平均检索延迟 |
-| :--- | ---: | ---: | ---: | ---: |
-| vector (BGE-M3 + pgvector) | **92.31%** | 97.44% | 0.7479 | 632.1 ms |
-| fulltext (BM25/jieba) | 82.05% | 84.62% | 0.8075 | 151.9 ms |
-| hybrid 0.7/0.3 | 89.74% | 92.31% | 0.7799 | 814.2 ms |
-| hybrid 0.8/0.2 | **92.31%** | 94.87% | 0.7274 | 未单独计时 |
+| 模式 | Success@3 | RR@3 | nDCG@3 | evidence_all@3 | 平均检索延迟 |
+| :--- | ---: | ---: | ---: | ---: | ---: |
+| vector (BGE-M3 + pgvector) | **92.31%** | 0.7094 | 0.7629 | **92.31%** | 464.1 ms |
+| fulltext (BM25/jieba) | 82.05% | 0.7778 | 0.7888 | 82.05% | 71.2 ms |
+| hybrid 0.7/0.3 | 89.74% | 0.7521 | 0.7894 | 89.74% | 544.2 ms |
+| hybrid 0.8/0.2 | **92.31%** | — | — | **92.31%** | 未单独计时 |
 
+> 标准指标由 `ir_measures` 计算；`Success@3` 的 relevance = “同一 chunk 同时包含全部 gold_evidence”。
+> 旧报告里的 MRR 0.7479 实际是 `evidence_any_rr`（只要包含任一 evidence），不是标准 MRR；两套都保留，但不要混写。
+> 延迟会随 embedding 网络/缓存波动（旧一轮为 632.1 / 151.9 / 814.2 ms），不构成矛盾。
 > 结论：混合检索没有稳定超过纯向量；简历项目不要写“混合检索显著提升”。真实结论是：BM25 更快、纯向量更准，hybrid 作为可调策略保留。
 
 ### 4.3 切块消融（R01–R08）
@@ -147,9 +150,9 @@ FastAPI (8000)
 ### 4.4 E2E
 
 - 模拟面试 grounding：**10/10**；
-- Agent 模式（10 条 SRE 问题）：**10/10** 关键词命中 + citations 非空 + 无 tool_error；
+- Agent 模式（10 条 SRE 问题，通用 smoke，不是求职域主评测）：**10/10** 关键词命中 + citations 非空 + 无 tool_error；
 - 上传 → 解析 → 向量化 → 提问 → 引用：**PASS**；
-- 后端：**92 passed in 44.05s**；
+- 后端：**126 passed**（新增 34 条 golden/标准指标/tracing/Langfuse/prompt/安全/匹配封顶测试）；
 - 前端：`npm run build` 通过（约 9.4s）。
 
 ### 4.5 延迟
@@ -161,7 +164,7 @@ FastAPI (8000)
 
 ## 5. 测试与质量
 
-- 18 个测试文件，92 条测试；
+- 25 个测试文件，126 条测试；
 - 覆盖：auth/隔离、KB/owner、admin、trace、Agent workflow、工具治理、检索/rerank/缓存、BM25、记忆、prompt、golden eval、chat SSE；
 - 前端构建通过；
 - 未覆盖/薄弱：
@@ -172,6 +175,24 @@ FastAPI (8000)
   - CI（没有 GitHub Actions）。
 
 ---
+
+### 5.1 安全与就绪（2026-10-20）
+
+- **CORS**：改为 `CORS_ORIGINS` 白名单（默认 `127.0.0.1/localhost:3000` 和 `:5173`），不再 `allow_origins=["*"]`；未知 Origin 的 preflight 返回 400；
+- **全局异常**：不再把 `str(exc)` 返回给客户端，只返回通用错误 + `request_id`；完整 traceback 写日志；
+- **请求 ID**：中间件生成/透传 `X-Request-Id`，响应头返回；
+- **API Key scope**：新增 `require_route_scope`，按路由前缀/方法强制：
+  - KB/files/chunks：`kb:read` / `kb:write`
+  - chat：`chat:read`
+  - career：`career:read` / `career:write`
+  - benchmark：`eval:run`
+  - settings 写入：`admin:*`
+  - `<prefix>:write` 隐含 `<prefix>:read`；`admin:*` 拥有全部权限
+- **/ready**：检查 PostgreSQL / Redis / LLM；PG/Redis 是硬依赖，LLM 默认只标记 `degraded`（`READY_REQUIRE_LLM=false`）；
+- **实测**：`chat:read` key 访问 KB list → 403；`kb:read` key → 200；`/ready` 返回 `postgres/redis/llm=ok`；CORS 未知 Origin → 400；
+- **CI**：`.github/workflows/ci.yml`，后端用 pgvector + Redis service 跑 pytest，前端跑 `npm ci && npm run build`；
+- **Docker**：`docker-compose.yml` + `backend/Dockerfile` + `frontend/Dockerfile`，见 §6.7；
+- 测试：**126 passed**。
 
 ## 6. 运行手册
 
@@ -212,13 +233,35 @@ cd ../frontend && npm run build
 
 ```bash
 cd backend
-python3 benchmark/eval_personal_kb.py          # 42 条 golden 检索
+# 42 条真实简历 golden（92.31% 那组数字）
+python3 benchmark/eval_personal_kb.py \
+  --kb-id kb_real_resumes \
+  --golden benchmark/real_resumes_golden.json
+# 38 条个人材料 golden（默认，不要和 42 条混用）
+python3 benchmark/eval_personal_kb.py
 python3 benchmark/interview_grounding_eval.py  # 10 条 grounded 面试
 python3 benchmark/agent_eval.py                # 10 条 Agent
 python3 ../scripts/e2e_upload_ask.py           # 上传->提问->引用
 ```
 
-### 6.5 数据脚本
+### 6.5 数据库迁移（Alembic）
+
+```bash
+cd /home/yang/Agentic-Multimodal-RAG/backend
+# 应用所有 migration（现有 agent_db 已 stamp 到 baseline，不会重复建表）
+JWT_SECRET="$(cat /tmp/lnu_dev_jwt_secret)" alembic upgrade head
+# 新增/修改表后生成迁移
+JWT_SECRET="$(cat /tmp/lnu_dev_jwt_secret)" alembic revision --autogenerate -m "add xxx"
+# 查看当前版本
+JWT_SECRET="$(cat /tmp/lnu_dev_jwt_secret)" alembic current
+```
+
+- baseline revision：`alembic/versions/afbfd34f4028_baseline_schema.py`，包含 pgvector 扩展、全部表和 HNSW 索引；
+- 现有库已执行 `alembic stamp head`；
+- `AUTO_MIGRATE=true` 时后端启动会自动 `upgrade head`；生产多实例建议设为 `false`，由发布流程单独跑 migration；
+- SQLite 测试库仍由 `SQLModel.metadata.create_all` 创建，因为 baseline 使用 pgvector 类型。
+
+### 6.6 数据脚本
 
 ```bash
 python3 scripts/seed_admin.py
@@ -227,7 +270,21 @@ python3 scripts/sync_pgvector.py
 python3 scripts/ingest_real_resumes.py
 ```
 
-### 6.6 注意
+### 6.7 Docker Compose
+
+```bash
+cd /home/yang/Agentic-Multimodal-RAG
+export JWT_SECRET="$(cat /tmp/lnu_dev_jwt_secret)"
+docker compose build
+docker compose up -d
+curl http://127.0.0.1:8000/ready
+```
+
+- 组成：pgvector + Redis + backend（Alembic 自动迁移）+ frontend（Nginx 反代 `/api/`，SSE 关闭 buffering）；
+- 详情见 `docs/DOCKER.md`；
+- 本地 Ollama 需要把 `LLM_BASE_URL` / `EMBEDDING_BASE_URL` 改成 `http://host.docker.internal:11434/v1`。
+
+### 6.8 注意
 
 - `.env` 含真实模型 Key，不要提交；
 - `backend/storage/uploads/` 有真实简历，不要 `git clean`；
@@ -268,11 +325,11 @@ docs/               PRD, ADMIN_PLATFORM, INTERVIEW_QA, 本报告
 
 ### 8.1 P0（接手优先）
 
-1. **Langfuse 未接**：没有 trace、prompt 管理、dataset、experiment、score、人工标注；本地 `agent_traces` 只是临时替代。
+1. **Langfuse 已做云端验收**：trace、求职域 `career_demo_v1` dataset、`career_quality_baseline` experiment（match/score/fraud/star 四项均 1.0）、5 个 Agent prompt 的 Prompt Management（v1 production）均已跑通；`agent_sre_v1` 10 条仅作通用 smoke。无 key 时自动 no-op。仍缺 42 条简历/10 条 grounding 的 PII 上传方案，以及 `mock_interviewer` / `resume_doctor` 的 prompt 迁移。
 2. **提示词管理自研重复**：`system_prompts` 版本/草稿/发布/回滚 + `prompt_service` 用户覆盖，和 Langfuse Prompt Management 重叠。
 3. **评测自研重复**：42/10/10 的脚本和 JSON/报告，没有数据集版本、实验对比、人工标注；Langfuse Datasets/Experiments 可直接承接。
-4. **API Key scope 未全链路强制**：只有 `admin:*`；`chat:read`/`kb:read`/`eval:run` 只记录。
-5. **PII 风险**：本地 trace 存 query/answer 预览；Langfuse 接入前必须脱敏/伪名化。
+4. ~~API Key scope 未全链路强制~~ **已修复（2026-10-20）**：`require_route_scope` 按路由前缀/方法强制 `kb:read`、`kb:write`、`chat:read`、`career:read/write`、`eval:run`、`admin:*`；`<prefix>:write` 隐含 `<prefix>:read`。
+5. **PII 已处理（2026-10-20）**：tracked 文件中已无真实姓名/文件名/手机号/邮箱；`personal_kb_golden.json` 使用 `resume.pdf` / `resume.docx` 别名，真实文件名只在本机 ignored 的 `personal_kb_files.local.json`；`interview_grounding_eval.py`、`chunking_eval.py`、`scripts/*` 改用环境变量；`real_resumes_*` 与 `data/真实简历/` 继续 gitignore。Langfuse Cloud 只上传求职域合成简历（`career_demo_v1`）和 SRE smoke。本地 trace 仍存 query/answer 预览，接 Cloud 时用 `TRACE_CONTENT_MODE=metadata/redacted`。
 
 ### 8.2 P1
 
@@ -281,7 +338,7 @@ docs/               PRD, ADMIN_PLATFORM, INTERVIEW_QA, 本报告
 - 更多 agent eval（当前 10 条）；
 - token/cost 采集（当前没有）；
 - 文件状态 `parsed` 与 `ready` 语义统一；
-- API Key scope 逐路由校验。
+- ~~API Key scope 逐路由校验~~ **已完成（2026-10-20）**。
 
 ### 8.3 明确不要做
 
@@ -344,20 +401,77 @@ docs/               PRD, ADMIN_PLATFORM, INTERVIEW_QA, 本报告
 - 简历 PII 不能裸送 SaaS；
 - 版本/标签漂移：必须记录 prompt version 到 trace。
 
+> **兼容性 spike 结果（2026-10-19）**：临时 venv（Python 3.14）安装 `langfuse==5.0.2` 成功，安装 `langchain-core>=1` 后 `from langfuse.langchain import CallbackHandler` 可正常导入。项目环境也已安装并导入成功；若后续依赖冲突，可退回 OpenTelemetry OTLP exporter。
+
+### 9.7 当前实现状态（2026-10-19）
+
+已接入（代码层）：
+
+- `app/core/tracing.py`：Langfuse 惰性单例、失败降级、PII mask、trace/observation 封装；
+- `api/chat.py`：每次聊天一个 root trace，`done` 事件返回 `langfuse_trace_id`；
+- `agent_workflow`：LangChain `CallbackHandler` 绑定 trace，覆盖意图/agent/grading/answer 的 LLM 调用；
+- `tools/governance.py`：`tool.search_knowledge_base` span；
+- `services/retrieval.py`：`retrieval.search` retriever span；
+- `services/chat.py`：`rerank` span；
+- `services/llm.py`：普通模式的 `llm.generate_stream` / `llm.generate` generation span；
+- `main.py`：应用关闭时 flush。
+
+配置（`backend/.env`，不要把 key 提交）：
+
+```env
+LANGFUSE_ENABLED=true
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_HOST=https://cloud.langfuse.com
+TRACE_CONTENT_MODE=redacted   # metadata | redacted | full
+```
+
+验收前状态：没有 key 时 `tracer.enabled=false`，所有 span 为 no-op，聊天和 126 条测试照常通过；本地 `agent_traces` 继续写。
+
+**Datasets / Experiments（2026-10-19，Cloud Hobby）**
+
+- **求职域主数据集** `career_demo_v1`：5 条合成简历/JD（假姓名/假联系方式），覆盖简历×JD 匹配、跨领域低匹配、岗位反欺诈；
+- **求职域 Experiment** `career_quality_baseline`：
+  - `match_level_ok` / `score_range_ok` / `fraud_label_ok` / `has_star_rewrite` 均为 **1.000**；
+  - Experiment URL：`https://cloud.langfuse.com/project/cmvffar6c0cqxad0jocxy3h59/experiments/results?baseline=40a3377b1057c7f8`；
+- 通用 smoke `agent_sre_v1`：10 条 SRE 用例，`keyword_hit=0.925 / citation=1.0 / no_tool_error=1.0`，不作为求职域主评测；
+- 修复：`career_matcher` 在硬技能覆盖率 <34% 时封顶 LOW，避免跨领域简历被学历/项目泛化分抬到 MODERATE。
+- 复算命令：
+  ```bash
+  cd backend
+  JWT_SECRET=... python3 benchmark/langfuse_agent_dataset.py --run-experiment --limit 2
+  # 全量 10 条
+  JWT_SECRET=... python3 benchmark/langfuse_agent_dataset.py --run-experiment
+  ```
+- **未上传**：42 条真实简历、10 条 grounding。原因是 Cloud 免费版仍属外部服务，这些数据含 PII；要上传必须先伪名化，或改用自托管。
+- 已知限制：Experiment 的 task 通过 HTTP 调后端，因此 Experiment 的 trace 只包含 task span；后端真实 trace 通过输出里的 `langfuse_trace_id` 关联，暂未自动 merge。
+
+**Prompt Management（2026-10-19）**
+
+- 已上传 5 个 Agent prompt 到 Langfuse：`agent.intent` / `agent.system` / `agent.grading` / `agent.answer` / `agent.chat`，均为 **v1 + production label**；
+- 新增 `app/services/prompt_registry.py`：production label 拉取 + 300s 缓存 + 2s 超时 + 代码默认值 fallback；
+- 已移除 `agent_workflow.py` 里的硬编码 prompt；每次 LLM 调用的 trace metadata 记录 `prompt_key` / `prompt_version` / `prompt_label` / `prompt_source`；
+- 实测 trace `f7ad1a15...`：`agent.intent`、`agent.system`、`agent.grading`、`agent.answer` 均为 `version=1`、`label=production`、`source=langfuse`；
+- 改 production label 后，最多 300s（缓存 TTL）生效；Langfuse 不可用时回退代码默认值，不阻塞对话；
+- 尚未迁移：`mock_interviewer` / `resume_doctor` 等 `prompt_service` 模板，以及 Admin 自研 Prompt UI 的下线。
+
 ---
 
 ## 10. 交接计划（给接手人）
 
 ### 第 1 周：Langfuse tracing
 
-- 起 Langfuse（自托管/云）；
-- 接 SDK/OTel，打通聊天 trace；
+- 已选 **Cloud Hobby（免费：50k units/月、2 users、30 天数据访问）**；
+- 在 Langfuse Cloud 建项目，把 public/secret key 填进 `backend/.env`；
+- 先用 SRE 非 PII 知识库跑一次 Agent 问答和一次普通问答；
 - 保留 `agent_traces` fallback；
-- 验收：Langfuse 能看到完整一次 Agent/普通问答。
+- 验收：Langfuse 能看到 `retrieval → tool → LLM → answer` 的完整 trace，`done` 事件里的 `langfuse_trace_id` 可查；
+- PII：真实简历轨迹先设 `TRACE_CONTENT_MODE=metadata/redacted`，或改用自托管。
 
 ### 第 2 周：Prompt Management
 
-- 迁移 `mock_interviewer` / `resume_doctor` 等；
+- ✅ Agent prompt 已迁移：`agent.intent/system/grading/answer/chat`，v1 + production label；
+- 待迁移 `mock_interviewer` / `resume_doctor` 等 `prompt_service` 模板；
 - `production`/`staging` label；
 - app 拉取 + cache + fallback；
 - 验收：改 label 不重启生效；失败回退。
@@ -373,8 +487,8 @@ docs/               PRD, ADMIN_PLATFORM, INTERVIEW_QA, 本报告
 
 - 下线自研 prompt/eval UI（Admin 保留业务）；
 - 停双写；
-- 补 API Key scope、PII 脱敏测试、CI；
-- 验收：92 tests 仍全绿；前端构建通过；无重复 trace。
+- 补 PII 脱敏测试、CI；API Key scope 已完成；
+- 验收：全部测试仍全绿；前端构建通过；无重复 trace。
 
 ### 接手第一天
 
@@ -384,6 +498,7 @@ git status                 # 应为 clean
 bash scripts/doctor.sh
 cd backend && JWT_SECRET="$(cat /tmp/lnu_dev_jwt_secret)" python3 -m pytest tests -q
 curl -s http://127.0.0.1:8000/health
+curl -s http://127.0.0.1:8000/ready   # PG / Redis / LLM 依赖状态
 ```
 
 不要先重构；先跑通、再按第 1 周接 Langfuse。
@@ -405,16 +520,18 @@ curl -s http://127.0.0.1:8000/health
 ```bash
 git log --oneline -8
 git status --short
-python3 -m pytest tests -q          # 92 passed
+python3 -m pytest tests -q          # 126 passed
 npm run build                       # 通过
 curl http://127.0.0.1:8000/health    # {"status":"ok"}
+curl http://127.0.0.1:8000/ready     # {"status":"ok","checks":{...}}
 psql ...                           # 3 users / 8 KB / 23 files / 330 chunks / 330 embeddings / 2 traces
 ```
 
 真实评测文件：
 
 - `backend/benchmark/report.md`
-- `backend/benchmark/personal_kb_eval.json`
+- `backend/benchmark/real_resumes_eval.json`（42 条真实简历 golden 的结果）
+- `backend/benchmark/personal_kb_eval.json`（38 条个人材料 golden，和 42 条不是同一套）
 - `backend/benchmark/interview_grounding_eval.json`
 - `backend/benchmark/agent_eval.json`
 

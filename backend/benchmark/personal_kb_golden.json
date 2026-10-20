@@ -3,23 +3,23 @@
   "created": "2026-10-18",
   "purpose": "只评测当前知识库里这四份已上传材料。答案以文档原文为准，不评现实里这些数字是否成立。",
   "corpus_files": [
-    "辽宁大学_27届_张梦洋.pdf",
-    "辽宁大学_27届_张梦洋.docx",
+    "resume.pdf",
+    "resume.docx",
     "实习项目和个人项目.md",
     "HiPro-LoRA.md"
   ],
   "size": 38,
   "mix": {
-    "notes_fact": 12,
-    "resume_fact": 8,
+    "notes_fact": 14,
+    "resume_fact": 9,
     "paper_fact": 6,
-    "refusal": 6,
-    "conflict": 6
+    "refusal": 5,
+    "conflict": 4
   },
   "scoring": {
     "hit_at_3": "召回的前 3 个 chunk 正文里出现 gold_evidence 中的每一条短语。出现在模型回答里不算命中。",
     "refusal": "回答明确说明上传材料里没有该信息，且不编造 gold_must_not 里的内容。",
-    "conflict": "同时指出两份材料各自的原文，不把两处数字合成一个指标。"
+    "conflict": "同时指出两份材料各自的原文，不把两处数字合成一个指标。conflict 用例单独评测，不混入 Hit@K/MRR；因为它们本来就要求跨 chunk 取证，用单 chunk 的 evidence_all 计算没有意义。"
   },
   "known_limits": [
     "简历 PDF/DOCX 目前几乎各是 1 个正文块，论文笔记是 1 个约 7.5 万字的块。这两类题主要检查能否点到正确文件，块内排序没有区分度。",
@@ -32,7 +32,10 @@
       "category": "notes_fact",
       "query": "笔记里这个排障项目的一句话定位是什么？",
       "gold_file": "实习项目和个人项目.md",
-      "gold_evidence": ["Dify 技术排障 Agent", "故障诊断闭环"],
+      "gold_evidence": [
+        "Dify 技术排障 Agent",
+        "故障诊断闭环"
+      ],
       "behavior": "answer"
     },
     {
@@ -40,7 +43,10 @@
       "category": "notes_fact",
       "query": "笔记 1.4 节写的知识库语料有多少篇、切成多少个 chunk？",
       "gold_file": "实习项目和个人项目.md",
-      "gold_evidence": ["583", "9253"],
+      "gold_evidence": [
+        "583",
+        "9253"
+      ],
       "behavior": "answer"
     },
     {
@@ -48,7 +54,12 @@
       "category": "notes_fact",
       "query": "笔记里生成评测集一共多少题，factoid、multi_hop、unanswerable 各多少？",
       "gold_file": "实习项目和个人项目.md",
-      "gold_evidence": ["600", "400", "120", "80"],
+      "gold_evidence": [
+        "600 题",
+        "factoid 400",
+        "multi_hop 120",
+        "unanswerable 80"
+      ],
       "behavior": "answer"
     },
     {
@@ -56,7 +67,10 @@
       "category": "notes_fact",
       "query": "笔记里人工审核后，真正可答的真实题有多少条？",
       "gold_file": "实习项目和个人项目.md",
-      "gold_evidence": ["15"],
+      "gold_evidence": [
+        "24.2%",
+        "15 条"
+      ],
       "behavior": "answer"
     },
     {
@@ -64,7 +78,9 @@
       "category": "notes_fact",
       "query": "笔记里 LLM 自动标注的 qrels 假阳性大约是多少？",
       "gold_file": "实习项目和个人项目.md",
-      "gold_evidence": ["80.4%"],
+      "gold_evidence": [
+        "80.4%"
+      ],
       "behavior": "answer"
     },
     {
@@ -72,7 +88,10 @@
       "category": "notes_fact",
       "query": "笔记 1.6 的检索表里，策划题和生成题的 Hit@1 分别是多少？",
       "gold_file": "实习项目和个人项目.md",
-      "gold_evidence": ["0.250", "0.480"],
+      "gold_evidence": [
+        "0.250",
+        "0.480"
+      ],
       "behavior": "answer"
     },
     {
@@ -80,7 +99,10 @@
       "category": "notes_fact",
       "query": "笔记里 73 题任务集的任务成功率是多少，对应成功了几题？",
       "gold_file": "实习项目和个人项目.md",
-      "gold_evidence": ["89.0%", "65/73"],
+      "gold_evidence": [
+        "89.0%",
+        "65/73"
+      ],
       "behavior": "answer"
     },
     {
@@ -88,7 +110,10 @@
       "category": "notes_fact",
       "query": "笔记里排障根因命中率从多少提升到多少？",
       "gold_file": "实习项目和个人项目.md",
-      "gold_evidence": ["43.8%", "66.7%"],
+      "gold_evidence": [
+        "43.8%",
+        "66.7%"
+      ],
       "behavior": "answer"
     },
     {
@@ -96,7 +121,9 @@
       "category": "notes_fact",
       "query": "笔记里 Query 改写最多重试几次？",
       "gold_file": "实习项目和个人项目.md",
-      "gold_evidence": ["限 2 次"],
+      "gold_evidence": [
+        "限 2 次"
+      ],
       "behavior": "answer"
     },
     {
@@ -104,7 +131,9 @@
       "category": "notes_fact",
       "query": "笔记 1.3 节写的排障检索融合，dense 权重 α 是多少？",
       "gold_file": "实习项目和个人项目.md",
-      "gold_evidence": ["α=0.1"],
+      "gold_evidence": [
+        "α=0.1"
+      ],
       "behavior": "answer"
     },
     {
@@ -112,7 +141,10 @@
       "category": "notes_fact",
       "query": "笔记里沙盒是怎样防止命令注入的？",
       "gold_file": "实习项目和个人项目.md",
-      "gold_evidence": ["shlex.split", "shell=False"],
+      "gold_evidence": [
+        "shlex.split",
+        "shell=False"
+      ],
       "behavior": "answer"
     },
     {
@@ -120,71 +152,100 @@
       "category": "notes_fact",
       "query": "笔记里 197 和 192 是不是同一个池子？拒答负样本 192 条是怎么加出来的？",
       "gold_file": "实习项目和个人项目.md",
-      "gold_evidence": ["不是同一个池子", "145", "37", "10"],
+      "gold_evidence": [
+        "不是同一个池子",
+        "145",
+        "37",
+        "10"
+      ],
       "behavior": "answer"
     },
     {
       "id": "R01",
       "category": "resume_fact",
       "query": "简历上的硕士学校、专业和时间是什么？",
-      "gold_file": "辽宁大学_27届_张梦洋.pdf",
-      "gold_evidence": ["辽宁大学", "2024.9-2027.6", "软件工程"],
+      "gold_file": "resume.pdf",
+      "gold_evidence": [
+        "辽宁大学",
+        "2024.9-2027.6",
+        "软件工程"
+      ],
       "behavior": "answer"
     },
     {
       "id": "R02",
       "category": "resume_fact",
       "query": "简历上的本科院校、专业和时间是什么？",
-      "gold_file": "辽宁大学_27届_张梦洋.pdf",
-      "gold_evidence": ["河北师范大学", "2020.9-2022.6", "计算机科学与技术"],
+      "gold_file": "resume.pdf",
+      "gold_evidence": [
+        "河北师范大学",
+        "2020.9-2022.6",
+        "计算机科学与技术"
+      ],
       "behavior": "answer"
     },
     {
       "id": "R03",
       "category": "resume_fact",
       "query": "简历上的实习单位和起止时间是什么？",
-      "gold_file": "辽宁大学_27届_张梦洋.pdf",
-      "gold_evidence": ["中国科学院沈阳自动化研究所", "2026.3-2026.9"],
+      "gold_file": "resume.pdf",
+      "gold_evidence": [
+        "中国科学院沈阳自动化研究所",
+        "2026.3-2026.9"
+      ],
       "behavior": "answer"
     },
     {
       "id": "R04",
       "category": "resume_fact",
       "query": "简历上写的 GitHub 地址是什么？",
-      "gold_file": "辽宁大学_27届_张梦洋.pdf",
-      "gold_evidence": ["github.com/my420254"],
+      "gold_file": "resume.pdf",
+      "gold_evidence": [
+        "github.com/my420254"
+      ],
       "behavior": "answer"
     },
     {
       "id": "R05",
       "category": "resume_fact",
       "query": "简历上第一篇论文的会议和作者排序怎么写的？",
-      "gold_file": "辽宁大学_27届_张梦洋.pdf",
-      "gold_evidence": ["ECML PKDD 2026", "学生一作"],
+      "gold_file": "resume.pdf",
+      "gold_evidence": [
+        "ECML PKDD 2026",
+        "学生一作"
+      ],
       "behavior": "answer"
     },
     {
       "id": "R06",
       "category": "resume_fact",
       "query": "简历上第二篇论文的会议级别怎么写的？",
-      "gold_file": "辽宁大学_27届_张梦洋.pdf",
-      "gold_evidence": ["WISA 2026", "CCF-C"],
+      "gold_file": "resume.pdf",
+      "gold_evidence": [
+        "WISA 2026",
+        "CCF-C"
+      ],
       "behavior": "answer"
     },
     {
       "id": "R07",
       "category": "resume_fact",
       "query": "简历上排障项目的名称是什么？",
-      "gold_file": "辽宁大学_27届_张梦洋.pdf",
-      "gold_evidence": ["基于 Agentic RAG 与沙盒验证的技术故障排障系统"],
+      "gold_file": "resume.pdf",
+      "gold_evidence": [
+        "基于 Agentic RAG 与沙盒验证的技术故障排障系统"
+      ],
       "behavior": "answer"
     },
     {
       "id": "R08",
       "category": "resume_fact",
       "query": "简历上具身项目写的检索权重是多少？",
-      "gold_file": "辽宁大学_27届_张梦洋.pdf",
-      "gold_evidence": ["BM25 0.4", "BGE 0.6"],
+      "gold_file": "resume.pdf",
+      "gold_evidence": [
+        "BM25 0.4",
+        "BGE 0.6"
+      ],
       "behavior": "answer"
     },
     {
@@ -192,7 +253,11 @@
       "category": "paper_fact",
       "query": "论文笔记里 AHSP 提取了哪三个视角？",
       "gold_file": "HiPro-LoRA.md",
-      "gold_evidence": ["注意力池化", "均值池化", "最大池化"],
+      "gold_evidence": [
+        "注意力池化",
+        "均值池化",
+        "最大池化"
+      ],
       "behavior": "answer"
     },
     {
@@ -200,7 +265,12 @@
       "category": "paper_fact",
       "query": "论文笔记里去掉 AHSP 后，SST-5 Config B 的标准差从多少变成多少？",
       "gold_file": "HiPro-LoRA.md",
-      "gold_evidence": ["1.69%", "23.03%"],
+      "gold_evidence": [
+        "SST-5 Config B",
+        "标准差",
+        "1.69",
+        "23.03"
+      ],
       "behavior": "answer"
     },
     {
@@ -208,7 +278,9 @@
       "category": "paper_fact",
       "query": "论文笔记里 TPMB 的中文全称是什么？",
       "gold_file": "HiPro-LoRA.md",
-      "gold_evidence": ["尾部感知原型记忆库"],
+      "gold_evidence": [
+        "尾部感知原型记忆库"
+      ],
       "behavior": "answer"
     },
     {
@@ -216,7 +288,9 @@
       "category": "paper_fact",
       "query": "论文笔记里为什么把 Macro-F1 当作第一核心指标？",
       "gold_file": "HiPro-LoRA.md",
-      "gold_evidence": ["不被多数类样本量主导"],
+      "gold_evidence": [
+        "不被多数类样本量主导"
+      ],
       "behavior": "answer"
     },
     {
@@ -224,7 +298,10 @@
       "category": "paper_fact",
       "query": "论文笔记里 HiPro-LoRA 这个缩写分别对应哪两个模块？",
       "gold_file": "HiPro-LoRA.md",
-      "gold_evidence": ["Hierarchical Pooling", "Prototype Regularization"],
+      "gold_evidence": [
+        "Hierarchical Pooling",
+        "Prototype Regularization"
+      ],
       "behavior": "answer"
     },
     {
@@ -232,7 +309,9 @@
       "category": "paper_fact",
       "query": "论文笔记里模型参数量写成了多少？",
       "gold_file": "HiPro-LoRA.md",
-      "gold_evidence": ["110M"],
+      "gold_evidence": [
+        "110M"
+      ],
       "behavior": "answer"
     },
     {
@@ -241,7 +320,10 @@
       "query": "这份材料里的期望薪资是多少？",
       "gold_file": null,
       "gold_evidence": [],
-      "gold_must_not": ["元", "万"],
+      "gold_must_not": [
+        "元",
+        "万"
+      ],
       "behavior": "refuse"
     },
     {
@@ -259,7 +341,9 @@
       "query": "简历或笔记里有没有写这篇论文发表在 NeurIPS？",
       "gold_file": null,
       "gold_evidence": [],
-      "gold_must_not": ["NeurIPS"],
+      "gold_must_not": [
+        "NeurIPS"
+      ],
       "behavior": "refuse"
     },
     {
@@ -268,26 +352,35 @@
       "query": "材料里有没有辽宁省公共舆情与网络安全信息系统重点实验室这个单位？",
       "gold_file": null,
       "gold_evidence": [],
-      "gold_must_not": ["重点实验室"],
+      "gold_must_not": [
+        "重点实验室"
+      ],
       "behavior": "refuse"
     },
     {
       "id": "X05",
       "category": "refusal",
       "query": "简历正文有没有写 Jetson？",
-      "gold_file": "辽宁大学_27届_张梦洋.pdf",
+      "gold_file": "resume.pdf",
       "gold_evidence": [],
-      "gold_must_not": ["Jetson"],
+      "gold_must_not": [
+        "Jetson"
+      ],
       "behavior": "refuse",
       "note": "只查简历正文。实习笔记后半若出现 Jetson，不能用来回答这题。"
     },
     {
       "id": "X06",
-      "category": "refusal",
+      "category": "resume_fact",
       "query": "材料里 CET-6 的具体分数是多少？",
-      "gold_file": "辽宁大学_27届_张梦洋.pdf",
-      "gold_evidence": ["500+"],
-      "gold_must_not": ["550", "600"],
+      "gold_file": "resume.pdf",
+      "gold_evidence": [
+        "500+"
+      ],
+      "gold_must_not": [
+        "550",
+        "600"
+      ],
       "behavior": "answer",
       "note": "只能回答材料写的是 500+，不能补一个具体分数。"
     },
@@ -296,7 +389,11 @@
       "category": "conflict",
       "query": "排障系统的检索权重到底是 dense α=0.1，还是 BM25 0.4 加 BGE 0.6？",
       "gold_file": "实习项目和个人项目.md",
-      "gold_evidence": ["α=0.1", "BM25 0.4", "BGE 0.6"],
+      "gold_evidence": [
+        "α=0.1",
+        "BM25 0.4",
+        "BGE 0.6"
+      ],
       "behavior": "report_conflict",
       "note": "α=0.1 在笔记 1.3，对应 Dify 排障检索。BM25 0.4 + BGE 0.6 在简历的具身项目，不是同一条链路。"
     },
@@ -304,8 +401,13 @@
       "id": "C02",
       "category": "conflict",
       "query": "Top-3 准确率 84% 和 MRR@3 0.72 出自哪一份材料？笔记第一部分的检索表是这组数吗？",
-      "gold_file": "辽宁大学_27届_张梦洋.pdf",
-      "gold_evidence": ["84%", "0.72", "0.250", "0.480"],
+      "gold_file": "resume.pdf",
+      "gold_evidence": [
+        "84%",
+        "0.72",
+        "0.250",
+        "0.480"
+      ],
       "behavior": "report_conflict",
       "note": "84% 和 0.72 在简历具身项目产出。笔记 1.6 的表是 Hit@1 0.250 和 0.480。"
     },
@@ -314,7 +416,13 @@
       "category": "conflict",
       "query": "材料里的 23pp 分别指什么？不要合成成一个指标。",
       "gold_file": "实习项目和个人项目.md",
-      "gold_evidence": ["23pp", "43.8%", "66.7%", "0.250", "0.480"],
+      "gold_evidence": [
+        "23pp",
+        "43.8%",
+        "66.7%",
+        "0.250",
+        "0.480"
+      ],
       "behavior": "report_conflict",
       "note": "一处是根因命中率从 43.8% 到 66.7% 的提升。另一处是策划题 Hit@1 0.250 相对生成题 0.480 的落差。"
     },
@@ -322,26 +430,36 @@
       "id": "C04",
       "category": "conflict",
       "query": "论文作者角色，简历和论文笔记各怎么写？",
-      "gold_file": "辽宁大学_27届_张梦洋.pdf",
-      "gold_evidence": ["学生一作", "独立构思"],
+      "gold_file": "resume.pdf",
+      "gold_evidence": [
+        "学生一作",
+        "独立构思"
+      ],
       "behavior": "report_conflict",
       "note": "简历写学生一作。论文笔记写两篇论文全部独立构思、实验并撰写。回答时两句都要出现。"
     },
     {
       "id": "C05",
-      "category": "conflict",
+      "category": "notes_fact",
       "query": "笔记追问点 2 说 9pp 这个口径为什么不能再用？",
       "gold_file": "实习项目和个人项目.md",
-      "gold_evidence": ["9pp", "23pp", "80%"],
+      "gold_evidence": [
+        "9pp",
+        "23pp",
+        "80%"
+      ],
       "behavior": "answer",
       "note": "笔记写明 9pp 是旧口径，现行口径是策划题 25% 对生成题 48%，落差 23pp。"
     },
     {
       "id": "C06",
-      "category": "conflict",
+      "category": "notes_fact",
       "query": "简历如果写了工单系统的跨进程挂起，笔记建议怎么修正？",
       "gold_file": "实习项目和个人项目.md",
-      "gold_evidence": ["没有工单系统", "interrupt()"],
+      "gold_evidence": [
+        "没有工单系统",
+        "interrupt()"
+      ],
       "behavior": "answer"
     }
   ]

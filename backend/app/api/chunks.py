@@ -8,12 +8,15 @@ from typing import List
 from datetime import datetime, timezone
 
 from app.core.database import get_session
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_route_scope
 from app.core.access import get_visible_chunk, get_visible_file
 from app.models import FileDocument, DocumentChunk, FileStatus, User
 from app.schemas import ChunkResponse, ChunkUpdate, VectorizeResponse, ApiResponse
 
-router = APIRouter(tags=["Chunk"], dependencies=[Depends(get_current_user)])
+router = APIRouter(
+    tags=["Chunk"],
+    dependencies=[Depends(get_current_user), Depends(require_route_scope)],
+)
 
 
 @router.get("/files/{file_id}/chunks", response_model=ApiResponse[List[ChunkResponse]])

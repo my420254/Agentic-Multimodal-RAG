@@ -1,0 +1,16 @@
+.git
+.gitignore
+.logs
+.venv
+venv
+__pycache__
+**/__pycache__
+*.pyc
+frontend/node_modules
+frontend/dist
+backend/storage
+backend/local.db
+backend/local.db-shm
+backend/local.db-wal
+backend/.env
+backend/benchmark/real_resumes_report.md

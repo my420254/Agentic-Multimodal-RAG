@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -35,7 +36,10 @@ from app.services.parser import FileParser  # noqa: E402
 from app.services.vector_store import VectorStoreService  # noqa: E402
 
 KB_ID = "6d3e18a1-f70a-4acc-80a6-65eaea9a7a69"
-RESUME_NAMES = ("辽宁大学_27届_张梦洋.pdf", "辽宁大学_27届_张梦洋.docx")
+# 真实文件名只在本地环境变量里设置：RESUME_NAMES="a.pdf,b.docx"
+RESUME_NAMES = tuple(
+    name.strip() for name in os.getenv("RESUME_NAMES", "").split(",") if name.strip()
+)
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 50
 
@@ -48,6 +52,14 @@ def _content_type(raw: str) -> ContentType:
 
 
 async def main() -> int:
+    if not RESUME_NAMES:
+        print(
+            "请先设置 RESUME_NAMES，例如："
+            'RESUME_NAMES="resume.pdf,resume.docx"',
+            file=sys.stderr,
+        )
+        return 2
+
     engine.echo = False
     embedder = EmbeddingService()
     vector_store = VectorStoreService()

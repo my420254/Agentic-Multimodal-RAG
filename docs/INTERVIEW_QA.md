@@ -362,7 +362,7 @@ RRF：`score = Σ 1/(k + rank_i)`，只看排名，不看原始分数，避免�
 
 召回负责“别漏”，rerank 负责“排序准”。Cross-encoder 看 query-doc 对，比双塔向量更精细，但贵，只能放在小候选集上。
 
-本项目：BGE-reranker-v2-m3，hybrid 后取更多候选再 rerank。实测同一个问题，无 rerank 时 top1 是无关图片，加 rerank 后 top1 命中张梦洋；TTFT 从 2.99s 增到 3.70s。收益是排序，代价是延迟。
+本项目：BGE-reranker-v2-m3，hybrid 后取更多候选再 rerank。实测同一个问题，无 rerank 时 top1 是无关图片，加 rerank 后 top1 命中目标候选人；TTFT 从 2.99s 增到 3.70s。收益是排序，代价是延迟。
 
 ### Q41 元数据过滤解决什么？文档类型/权限怎么参与？
 
@@ -401,7 +401,7 @@ RRF：`score = Σ 1/(k + rank_i)`，只看排名，不看原始分数，避免�
 
 应该：明确说“材料里没有”，不要编；给出可补充的信息；必要时转人工/建议上传材料。
 
-本项目：Agent system prompt 要求“多次尝试仍无结果要诚实告知”；B 用户用 Agent 空 kb_ids 问“张梦洋的硕士学校”时，实际只召回 SRE 文档，回答“知识库没有相关信息，不会臆测”。但没有硬性拒答分类器/阈值门禁，主要靠提示词和 grading。
+本项目：Agent system prompt 要求“多次尝试仍无结果要诚实告知”；B 用户用 Agent 空 kb_ids 问“目标候选人的硕士学校”时，实际只召回 SRE 文档，回答“知识库没有相关信息，不会臆测”。但没有硬性拒答分类器/阈值门禁，主要靠提示词和 grading。
 
 ### Q45 幻觉怎么降低？
 
@@ -638,7 +638,7 @@ pgvector 是 PG 的向量类型 + 索引；PG FTS 是 tsvector/tsquery/GIN。本
   - `grounding_available: bool`
   - `grounding_citations: [{chunk_id,file_name,location,score,content}]`
 - 前端不再显示 1–10 分，只显示“基于简历材料”和引用片段；
-- 实测：2023001 选张梦洋 PDF，4 条 citations 全部来自该 PDF；2023002 传同一 `resume_file_id` 返回 404。
+- 实测：2023001 选目标候选人 PDF，4 条 citations 全部来自该 PDF；2023002 传同一 `resume_file_id` 返回 404。
 
 ### 6.6 模拟面试 grounding E2E
 

@@ -363,7 +363,7 @@ event: token
 data: {"content": "谈谈在高并发场景下"}
 
 event: citation
-data: {"material_title": "张梦洋简历.pdf", "page": 1, "section": "广州省心购实习"}
+data: {"material_title": "候选人简历.pdf", "page": 1, "section": "某实习经历"}
 
 event: stage_change
 data: {"current_stage": "STAGE_3_ENGINEERING_BOUNDARY", "action": "DEEP_PROBE"}

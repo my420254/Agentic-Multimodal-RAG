@@ -12,7 +12,7 @@ from sqlmodel import Session, select, delete, func
 from typing import List, Optional
 
 from app.core.database import get_session
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_route_scope
 from app.core.access import get_visible_kb, kb_visibility_filter
 from app.models import KnowledgeBase, CustomModel, RetrievalLog, User
 from sqlalchemy import or_
@@ -25,7 +25,10 @@ from app.services.rerank import RerankService, batch_rerank, expand_context
 import time
 import re
 
-router = APIRouter(tags=["Recall"], dependencies=[Depends(get_current_user)])
+router = APIRouter(
+    tags=["Recall"],
+    dependencies=[Depends(get_current_user), Depends(require_route_scope)],
+)
 
 
 @router.post(

@@ -108,3 +108,71 @@ def get_current_admin(
                 detail="该 API Key 缺少 admin:* scope",
             )
     return current_user
+
+
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+def has_scope(request: Request, required: str) -> bool:
+    """JWT 用户走角色/owner 校验；API Key 走 scope 校验。
+
+    约定：
+    - ``admin:*`` 拥有全部权限；
+    - ``<prefix>:write`` 隐含 ``<prefix>:read``；
+    - ``<prefix>:*`` 拥有该前缀全部权限。
+    """
+    if getattr(request.state, "auth_method", None) != "api_key":
+        return True
+
+    scopes = set(getattr(request.state, "api_key_scopes", set()))
+    if "admin:*" in scopes or required in scopes:
+        return True
+
+    prefix, _, action = required.partition(":")
+    if action == "read" and f"{prefix}:write" in scopes:
+        return True
+    return f"{prefix}:*" in scopes
+
+
+def _scope_for_request(request: Request) -> Optional[str]:
+    """按路由前缀和方法映射所需 scope；未覆盖的路径返回 None。"""
+    path = request.url.path
+    method = request.method.upper()
+
+    if path.startswith("/api/v1/auth/"):
+        return None
+    if path.startswith("/api/v1/benchmark/"):
+        return "eval:run"
+    if path.startswith("/api/v1/chat/"):
+        return "chat:read"
+    if path.startswith("/api/v1/career/"):
+        return "career:read" if method in SAFE_METHODS else "career:write"
+    # recall 的 POST 是检索/搜索，不是写操作；只有 DELETE 检索日志算写。
+    if path.endswith("/recall") or path.startswith("/api/v1/recall/"):
+        return "kb:write" if method == "DELETE" else "kb:read"
+    if path.startswith((
+        "/api/v1/knowledge-bases",
+        "/api/v1/files",
+        "/api/v1/chunks",
+    )):
+        return "kb:read" if method in SAFE_METHODS else "kb:write"
+    if path.startswith("/api/v1/settings"):
+        # 读配置/模型列表用 kb:read；改配置/模型必须是 admin:*
+        return "kb:read" if method in SAFE_METHODS else "admin:*"
+    if path.startswith("/api/v1/models"):
+        return "kb:read"
+    return None
+
+
+def require_route_scope(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """保护性路由的统一 scope 检查；JWT 用户直接放行。"""
+    required = _scope_for_request(request)
+    if required and not has_scope(request, required):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"该 API Key 缺少 {required} scope",
+        )
+    return current_user

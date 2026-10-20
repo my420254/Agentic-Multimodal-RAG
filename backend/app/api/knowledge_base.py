@@ -9,7 +9,7 @@ from datetime import datetime
 import os
 
 from app.core.database import get_session
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_route_scope
 from app.core.access import get_visible_kb, kb_visibility_filter
 from app.models import KnowledgeBase, FileDocument, User
 from app.schemas import (
@@ -23,7 +23,7 @@ from app.services.vector_store import VectorStoreService
 router = APIRouter(
     prefix="/knowledge-bases",
     tags=["KnowledgeBase"],
-    dependencies=[Depends(get_current_user)],
+    dependencies=[Depends(get_current_user), Depends(require_route_scope)],
 )
 
 

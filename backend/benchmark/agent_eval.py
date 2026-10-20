@@ -64,6 +64,21 @@ def ask(client: httpx.Client, token: str, question: str) -> dict:
     return {"status": 200, "answer": "".join(answer), "citations": citations, "steps": steps, "error": err}
 
 
+REFUSAL_MARKERS = (
+    "现有资料不足以完整回答",
+    "没有关于",
+    "未包含",
+    "知识库中未包含",
+    "未检索到",
+    "没有找到相关",
+    "无法完整回答",
+)
+
+
+def _is_refusal(answer: str) -> bool:
+    return any(marker in answer for marker in REFUSAL_MARKERS)
+
+
 def main() -> int:
     with httpx.Client(base_url=BASE, timeout=120, trust_env=False) as client:
         login = client.post("/api/v1/auth/login", json={"student_id": "2023001", "password": "Test@123456"})
@@ -80,16 +95,31 @@ def main() -> int:
             answer = r.get("answer") or ""
             citations = r.get("citations") or []
             tool_errors = [s for s in (r.get("steps") or []) if s.get("step") == "tool_error"]
-            hit = any(k.lower() in answer.lower() for k in expected)
-            ok = r.get("status") == 200 and not r.get("error") and hit and bool(citations) and not tool_errors
+            hit_any = any(k.lower() in answer.lower() for k in expected)
+            hit_all = all(k.lower() in answer.lower() for k in expected)
+            refusal = _is_refusal(answer)
+            # 只命中关键词不代表答对；非预期拒答必须判失败。
+            ok = (
+                r.get("status") == 200
+                and not r.get("error")
+                and hit_all
+                and not refusal
+                and bool(citations)
+                and not tool_errors
+            )
             if ok:
                 passed += 1
             results.append({
                 "id": cid, "question": question, "ok": ok, "latency_ms": latency,
-                "keyword_hit": hit, "citation_count": len(citations),
+                "keyword_hit": hit_any, "keyword_hit_all": hit_all,
+                "refusal_detected": refusal, "citation_count": len(citations),
                 "tool_errors": tool_errors, "answer": answer[:500],
             })
-            print(f"[{cid}] {'OK' if ok else 'FAIL'} hit={hit} citations={len(citations)} tool_errors={len(tool_errors)} {latency}ms")
+            print(
+                f"[{cid}] {'OK' if ok else 'FAIL'} hit_all={hit_all} "
+                f"refusal={refusal} citations={len(citations)} "
+                f"tool_errors={len(tool_errors)} {latency}ms"
+            )
             if not ok:
                 print("   ", answer[:200])
 

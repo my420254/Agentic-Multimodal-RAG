@@ -101,7 +101,7 @@ def run_tests():
         kb_id = kb_row[0]
         # 发送测试检索问题
         chat_payload = {
-            "messages": [{"role": "user", "content": "张梦洋的实习经历和个人项目有哪些？"}],
+            "messages": [{"role": "user", "content": "候选人的实习经历和个人项目有哪些？"}],
             "kb_ids": [kb_id],
             "model_id": "dd0c8bb7-b0c5-4857-93f6-0517ba1c177d",
             "search_mode": "hybrid",

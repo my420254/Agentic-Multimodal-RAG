@@ -1,9 +1,15 @@
-"""
-Agent 评测核心评分引擎 (Evaluator)
-覆盖：
-1. 结果层：任务完成率、命中率 (Hit Rate)、答案准确率、幻觉率
-2. 过程层：意图识别准确率、工具调用合规率、步骤数、死循环发生率
-3. 成本层：端到端延迟 (Latency)、Token 消耗预估
+"""DEPRECATED：旧版启发式 Agent 评分器，仅保留给 run_benchmark.py 做历史冒烟。
+
+不要把它当作回归门禁：
+- 关键词命中同时看 citations 和 answer，混淆了检索与生成；
+- loop_detected 只比较相邻 action 字符串，不是工具参数级检测；
+- est_tokens 是字符数估算，不能用于成本结论；
+- 拒答用正则匹配，脆弱。
+
+新评测请使用：
+- 检索指标：benchmark/metrics.py + ir_measures；
+- 业务断言：pytest（tests/test_agent_workflow.py、test_tool_governance.py 等）；
+- 需要语义评分时：RAGAS 等标准实现，并先做人工校准。
 """
 
 import re

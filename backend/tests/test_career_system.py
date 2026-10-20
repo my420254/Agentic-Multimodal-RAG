@@ -3,6 +3,7 @@
 研发单位：辽宁大学 · 辽宁省公共舆情与网络安全信息系统重点实验室
 """
 
+import json
 import uuid
 
 import pytest
@@ -102,7 +103,7 @@ async def test_career_matcher_resume_section_parsing():
 async def test_career_matcher_bidirectional_matching():
     """测试简历与岗位 JD 双向匹配计算、能力雷达与 STAR 重构"""
     sample_resume = """
-    张梦洋 - 辽宁大学硕士
+    候选人 - 某高校硕士
     技术栈：Python, FastAPI, Redis, Kafka, LangGraph, PostgreSQL, pgvector, Docker, LoRA.
     项目：构建 Agentic RAG 检索管线，使用 Redis 进行高并发限流，优化系统响应。
     """
@@ -223,9 +224,14 @@ def test_prompt_workshop_custom_update():
 
 
 @pytest.mark.asyncio
-async def test_mock_interview_adaptive_fallback_on_unknown():
+async def test_mock_interview_adaptive_fallback_on_unknown(monkeypatch):
     """测试当候选人明确表示盲区或不了解时，系统自适应触发降维引导(PIVOT_FALLBACK)并记录盲区"""
     from app.services.mock_interview import mock_interview_service, ProbingAction
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("forced llm failure to test deterministic fallback")
+
+    monkeypatch.setattr(mock_interview_service.llm, "generate", _boom)
     res = await mock_interview_service.chat(
         messages=[
             {"role": "user", "content": "关于 Redis 缓存一致性和双写延迟，我在学校项目里没接触过，不太清楚底层细节。"}
@@ -242,9 +248,26 @@ async def test_mock_interview_adaptive_fallback_on_unknown():
 
 
 @pytest.mark.asyncio
-async def test_mock_interview_adaptive_advance_on_confident_answer():
+async def test_mock_interview_adaptive_advance_on_confident_answer(monkeypatch):
     """测试当候选人回答明确且深入时，系统推进到深入工程或压测验证阶段"""
     from app.services.mock_interview import mock_interview_service, ProbingAction
+
+    async def _fake_generate(*args, **kwargs):
+        return json.dumps({
+            "score": 8,
+            "feedback": "原理清晰，能结合工程细节。",
+            "reply_text": "你提到了 Lua 原子性，这很好。继续谈谈边界情况。",
+            "is_probing": True,
+            "current_stage": "STAGE_3_ENGINEERING_BOUNDARY",
+            "probing_action": "DEEP_PROBE",
+            "current_skill_focus": "Redis 限流",
+            "identified_gaps": [],
+            "identified_strengths": ["Redis Lua 限流实现清晰"],
+            "recommended_reading": [],
+            "grounding_chunk_ids": [],
+        }, ensure_ascii=False)
+
+    monkeypatch.setattr(mock_interview_service.llm, "generate", _fake_generate)
     res = await mock_interview_service.chat(
         messages=[
             {"role": "user", "content": "我使用了 Redis ZSet 实现滑动窗口限流器，通过 Lua 脚本原子性执行 zremrangebyscore 和 zcard，有效避免了超卖。"}

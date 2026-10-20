@@ -11,6 +11,7 @@ import logging
 
 from app.core.config import get_settings
 from app.core.circuit_breaker import llm_circuit_breaker
+from app.core.tracing import tracer
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -118,26 +119,42 @@ class LLMService:
         
         request_messages.extend(messages)
 
-        try:
-            logger.debug("Sending streaming request to %s", target_model)
-            response = await client.chat.completions.create(
-                model=target_model,
-                messages=request_messages,
-                stream=True,
-                temperature=temperature,
-            )
+        output_parts: List[str] = []
+        with tracer.observation(
+            "llm.generate_stream",
+            as_type="generation",
+            model=target_model,
+            input={
+                "messages": request_messages,
+                "temperature": temperature,
+            },
+            metadata={"provider": "openai-compatible", "base_url": self.base_url},
+        ) as span:
+            try:
+                logger.debug("Sending streaming request to %s", target_model)
+                response = await client.chat.completions.create(
+                    model=target_model,
+                    messages=request_messages,
+                    stream=True,
+                    temperature=temperature,
+                )
 
-            async for chunk in response:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    yield chunk.choices[0].delta.content
-            
-            # 流式成功结束后通知熔断器记录成功
-            self.circuit_breaker._record_success()
+                async for chunk in response:
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        content = chunk.choices[0].delta.content
+                        output_parts.append(content)
+                        yield content
 
-        except Exception as e:
-            self.circuit_breaker._record_failure(e)
-            logger.error("LLM Stream Generate Error: %s", e)
-            raise e
+                # 流式成功结束后通知熔断器记录成功
+                self.circuit_breaker._record_success()
+
+            except Exception as e:
+                self.circuit_breaker._record_failure(e)
+                logger.error("LLM Stream Generate Error: %s", e)
+                tracer.update(span, status_message=str(e))
+                raise e
+            finally:
+                tracer.update(span, output="".join(output_parts))
 
     @retry(
         retry=retry_if_exception_type((APIConnectionError, RateLimitError, InternalServerError)),
@@ -170,11 +187,21 @@ class LLMService:
             )
             return response.choices[0].message.content
 
-        try:
-            return await self.circuit_breaker.call(_do_call)
-        except Exception as e:
-            logger.error("LLM Generate Error: %s", e)
-            raise e
+        with tracer.observation(
+            "llm.generate",
+            as_type="generation",
+            model=target_model,
+            input={"messages": request_messages},
+            metadata={"provider": "openai-compatible", "base_url": self.base_url},
+        ) as span:
+            try:
+                result = await self.circuit_breaker.call(_do_call)
+                tracer.update(span, output=result)
+                return result
+            except Exception as e:
+                logger.error("LLM Generate Error: %s", e)
+                tracer.update(span, status_message=str(e))
+                raise e
 
     def get_chat_model(self, temperature: float = 0.5, streaming: bool = True, max_tokens: int = None) -> ChatOpenAI:
         """获取 LangChain ChatOpenAI 实例"""

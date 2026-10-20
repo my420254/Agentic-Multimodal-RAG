@@ -1,7 +1,16 @@
-.PHONY: doctor dev stop test test-fast eval clean
+.PHONY: doctor dev stop test test-fast eval clean migrate migration
+
+JWT_SECRET ?= $(shell cat /tmp/lnu_dev_jwt_secret 2>/dev/null)
 
 doctor:
 	bash scripts/doctor.sh
+
+migrate:
+	cd backend && JWT_SECRET="$(JWT_SECRET)" alembic upgrade head
+
+# 用法：make migration m="add table xxx"
+migration:
+	cd backend && JWT_SECRET="$(JWT_SECRET)" alembic revision --autogenerate -m "$(m)"
 
 dev:
 	bash scripts/dev.sh

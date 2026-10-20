@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
@@ -28,9 +29,21 @@ from app.services.parser import FileParser  # noqa: E402
 
 settings = get_settings()
 
+UPLOAD_KB_DIR = BACKEND_DIR / "storage/uploads/6d3e18a1-f70a-4acc-80a6-65eaea9a7a69"
+
+
+def _resume_path(ext: str) -> Path | None:
+    """优先用 CHUNKING_PDF_PATH / CHUNKING_DOCX_PATH，否则从上传目录取第一份。"""
+    env_path = os.getenv(f"CHUNKING_{ext.upper()}_PATH")
+    if env_path:
+        return Path(env_path)
+    matches = sorted(UPLOAD_KB_DIR.glob(f"*.{ext}"))
+    return matches[0] if matches else None
+
+
 FILES = {
-    "pdf": BACKEND_DIR / "storage/uploads/6d3e18a1-f70a-4acc-80a6-65eaea9a7a69/0042547d-0a17-4f47-9e21-5dcd7f22d50d_辽宁大学_27届_张梦洋.pdf",
-    "docx": BACKEND_DIR / "storage/uploads/6d3e18a1-f70a-4acc-80a6-65eaea9a7a69/e53573bb-591f-4fad-b467-f92a8d58f4b8_辽宁大学_27届_张梦洋.docx",
+    "pdf": _resume_path("pdf"),
+    "docx": _resume_path("docx"),
 }
 SIZES = [300, 500, 800]
 GOLDEN = json.loads((BACKEND_DIR / "benchmark" / "personal_kb_golden.json").read_text(encoding="utf-8"))
@@ -43,6 +56,14 @@ def _hits(text: str, evidence: List[str]) -> int:
 
 
 async def main() -> int:
+    if not FILES["pdf"] or not FILES["docx"]:
+        print(
+            "缺少 PDF/DOCX：请设置 CHUNKING_PDF_PATH / CHUNKING_DOCX_PATH，"
+            "或把简历放到 backend/storage/uploads/<kb_id>/ 下。",
+            file=sys.stderr,
+        )
+        return 2
+
     embedder = EmbeddingService()
     client = chromadb.PersistentClient(
         path=settings.CHROMA_DB_DIR,

@@ -2,6 +2,8 @@
 数据库连接配置
 """
 
+from pathlib import Path
+
 from sqlmodel import SQLModel, create_engine, Session
 from sqlalchemy.pool import StaticPool
 from sqlalchemy import text
@@ -37,19 +39,40 @@ else:
         cursor.close()
 
 
+def _run_alembic_upgrade() -> None:
+    """在 PostgreSQL 上执行 Alembic upgrade head。
+
+    新增表/列请走 ``alembic revision --autogenerate``，不要再依赖 create_all。
+    """
+    from alembic import command
+    from alembic.config import Config
+
+    backend_dir = Path(__file__).resolve().parents[2]
+    cfg = Config(str(backend_dir / "alembic.ini"))
+    cfg.set_main_option("script_location", str(backend_dir / "alembic"))
+    command.upgrade(cfg, "head")
+
+
 def init_db():
-    """初始化数据库表；PostgreSQL 下确保 pgvector 扩展与 HNSW 索引存在。"""
+    """初始化数据库。
+
+    - PostgreSQL：Alembic upgrade head（AUTO_MIGRATE=true 时）；
+    - SQLite（测试/临时库）：保留 create_all，因为 alembic baseline 使用 pgvector 类型。
+    """
     is_pg = "postgresql" in settings.DATABASE_URL or "postgres" in settings.DATABASE_URL
     if is_pg:
         with engine.begin() as conn:
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-    SQLModel.metadata.create_all(engine)
-    if is_pg:
+        if settings.AUTO_MIGRATE:
+            _run_alembic_upgrade()
+        # baseline migration 已包含；这里保留幂等兜底，兼容未 stamp 的旧库。
         with engine.begin() as conn:
             conn.execute(text(
                 "CREATE INDEX IF NOT EXISTS ix_document_chunks_embedding_hnsw "
                 "ON document_chunks USING hnsw (embedding vector_cosine_ops)"
             ))
+    else:
+        SQLModel.metadata.create_all(engine)
 
 
 def get_session():

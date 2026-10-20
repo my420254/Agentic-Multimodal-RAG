@@ -4,9 +4,10 @@
 
 评测对象：
 - backend/benchmark/personal_kb_golden.json 的 38 条人工 golden；
-- 只评检索，不评生成；refusal 类（X01-X05）不计算 Hit@K；
-- 指标：evidence_all@3（严格：gold_evidence 每条都出现在 top3 正文）、
-  evidence_any@3、MRR、文件命中、检索延迟；
+- 只评检索，不评生成；refusal / report_conflict 类不混入 Hit@K 分母；
+- 标准指标：Success@3、P@3、Recall@3、RR@3、nDCG@3（由 ir_measures 计算）；
+- 兼容指标：evidence_all@3（严格：每条 gold_evidence 都出现在 top3 正文）、
+  evidence_any@3、evidence_any_rr、文件命中、检索延迟；
 - 参数：vector / fulltext / hybrid 三种模式；hybrid 权重扫描；BM25 k1/b 扫描。
 
 用法：
@@ -40,6 +41,13 @@ from app.core.database import engine  # noqa: E402
 from app.models import DocumentChunk, FileDocument, KnowledgeBase  # noqa: E402
 from app.services.bm25 import BM25Index  # noqa: E402
 from app.services.retrieval import RetrievalService, normalize_scores  # noqa: E402
+from benchmark.metrics import (  # noqa: E402
+    build_qrels,
+    is_retrieval_case,
+    results_to_run,
+    split_cases,
+    standard_metrics,
+)
 
 settings = get_settings()
 engine.echo = False
@@ -48,6 +56,26 @@ KB_ID = "6d3e18a1-f70a-4acc-80a6-65eaea9a7a69"
 GOLDEN_PATH = BACKEND_DIR / "benchmark" / "personal_kb_golden.json"
 OUT_JSON = BACKEND_DIR / "benchmark" / "personal_kb_eval.json"
 OUT_MD = BACKEND_DIR / "benchmark" / "personal_kb_report.md"
+# 真实文件名只放在本地 ignored 映射里；golden 使用 resume.pdf / resume.docx 别名。
+PERSONAL_FILES_LOCAL = BACKEND_DIR / "benchmark" / "personal_kb_files.local.json"
+
+
+def _load_file_aliases() -> Dict[str, str]:
+    if not PERSONAL_FILES_LOCAL.exists():
+        return {}
+    try:
+        return json.loads(PERSONAL_FILES_LOCAL.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+FILE_ALIASES = _load_file_aliases()
+
+
+def _resolve_file_alias(name: Optional[str]) -> Optional[str]:
+    if not name:
+        return name
+    return FILE_ALIASES.get(name, name)
 
 HYBRID_WEIGHTS = [
     (0.2, 0.8),
@@ -165,7 +193,12 @@ def _fuse(
 
 
 def _case_for_retrieval(case: Dict[str, Any]) -> bool:
-    return case.get("behavior") != "refuse" and bool(case.get("gold_evidence"))
+    """只把 behavior=answer 的题算进检索指标。
+
+    refuse 评的是生成端拒答；report_conflict 需要跨 chunk 取证，
+    用单 chunk 的 evidence_all 计算会系统性压低分数。
+    """
+    return is_retrieval_case(case)
 
 
 def main() -> int:
@@ -194,16 +227,19 @@ def main() -> int:
         if kb is None:
             print(f"[错误] PostgreSQL 中找不到个人知识库 {KB_ID}，先跑 migrate_personal_kb.py", file=sys.stderr)
             return 2
-        chunk_count = len(
-            session.exec(
-                select(DocumentChunk)
-                .join(FileDocument, DocumentChunk.file_id == FileDocument.id)
-                .where(FileDocument.kb_id == KB_ID)
-            ).all()
-        )
+        chunk_rows = session.exec(
+            select(DocumentChunk)
+            .join(FileDocument, DocumentChunk.file_id == FileDocument.id)
+            .where(FileDocument.kb_id == KB_ID)
+        ).all()
+        chunk_count = len(chunk_rows)
+        chunk_text_by_id = {row.id: row.content for row in chunk_rows}
 
         svc = RetrievalService()
         case_rows: List[Dict[str, Any]] = []
+        runs_by_mode: Dict[str, Dict[str, Dict[str, float]]] = {
+            mode: {} for mode in ("vector", "fulltext", "hybrid")
+        }
         weight_rows: Dict[Tuple[float, float], List[Dict[str, Any]]] = {
             pair: [] for pair in HYBRID_WEIGHTS
         }
@@ -215,7 +251,7 @@ def main() -> int:
             if not _case_for_retrieval(case):
                 return
             evidence = case.get("gold_evidence", [])
-            gold_file = case.get("gold_file")
+            gold_file = _resolve_file_alias(case.get("gold_file"))
             query = case["query"]
 
             vector_start = time.perf_counter()
@@ -298,6 +334,9 @@ def main() -> int:
                 row[f"{mode}_latency"] = row["latency_ms"][mode]
 
             case_rows.append(row)
+            runs_by_mode["vector"][case["id"]] = results_to_run(vector_results)
+            runs_by_mode["fulltext"][case["id"]] = results_to_run(bm25_results)
+            runs_by_mode["hybrid"][case["id"]] = results_to_run(hybrid_results)
 
             # 权重扫描：复用同一批 raw 结果，不重复 embedding
             for pair in HYBRID_WEIGHTS:
@@ -342,7 +381,10 @@ def main() -> int:
         async def run_all() -> None:
             for i, case in enumerate(cases, 1):
                 if not _case_for_retrieval(case):
-                    print(f"[{case['id']}] 跳过：refusal 类不计检索 Hit@K", flush=True)
+                    print(
+                        f"[{case['id']}] 跳过：behavior={case.get('behavior')} 不混入检索 Hit@K",
+                        flush=True,
+                    )
                     continue
                 await run_case(case)
                 if i % 5 == 0:
@@ -350,23 +392,39 @@ def main() -> int:
 
         asyncio.run(run_all())
 
+    groups = split_cases(cases)
+    qrels, invalid_cases = build_qrels(groups["retrieval"], chunk_text_by_id)
+    standard_by_mode = {
+        mode: standard_metrics(qrels, runs_by_mode[mode], k=3)
+        for mode in ("vector", "fulltext", "hybrid")
+    }
+
+    def _legacy_mode_metrics(mode: str) -> Dict[str, Any]:
+        legacy = _aggregate(
+            [
+                {
+                    "k3": r[f"{mode}_k3"],
+                    "k1": r[f"{mode}_k1"],
+                    "latency_ms": r[f"{mode}_latency"],
+                }
+                for r in case_rows
+            ]
+        )
+        # 旧字段名 mrr 实际是 evidence_any 的 reciprocal rank，不是标准 MRR；
+        # 标准 MRR 请使用 ir_measures 的 RR@3。
+        if "mrr" in legacy:
+            legacy["evidence_any_rr"] = legacy.pop("mrr")
+        return legacy
+
     summary = {
         "answerable_cases": len(case_rows),
-        "refusal_cases": len([c for c in cases if not _case_for_retrieval(c)]),
+        "refusal_cases": len(groups["refusal"]),
+        "conflict_cases": len(groups["conflict"]),
+        "invalid_cases": invalid_cases,
         "modes": {
             mode: {
-                "evidence_all@3": _aggregate(
-                    [{"k3": r[f"{mode}_k3"], "k1": r[f"{mode}_k1"], "latency_ms": r[f"{mode}_latency"]} for r in case_rows]
-                )["evidence_all@3"],
-                "evidence_any@3": _aggregate(
-                    [{"k3": r[f"{mode}_k3"], "k1": r[f"{mode}_k1"], "latency_ms": r[f"{mode}_latency"]} for r in case_rows]
-                )["evidence_any@3"],
-                "mrr": _aggregate(
-                    [{"k3": r[f"{mode}_k3"], "k1": r[f"{mode}_k1"], "latency_ms": r[f"{mode}_latency"]} for r in case_rows]
-                )["mrr"],
-                "latency_ms_mean": _aggregate(
-                    [{"k3": r[f"{mode}_k3"], "k1": r[f"{mode}_k1"], "latency_ms": r[f"{mode}_latency"]} for r in case_rows]
-                )["latency_ms_mean"],
+                **_legacy_mode_metrics(mode),
+                **standard_by_mode[mode],
             }
             for mode in ("vector", "fulltext", "hybrid")
         },
@@ -381,7 +439,7 @@ def main() -> int:
                 "evidence_any@3": round(
                     sum(r["k3"]["evidence_any"] for r in rows) / len(rows), 4
                 ),
-                "mrr": round(sum(r["k3"]["rr"] for r in rows) / len(rows), 4),
+                "evidence_any_rr": round(sum(r["k3"]["rr"] for r in rows) / len(rows), 4),
             }
             for pair, rows in weight_rows.items()
             if rows
@@ -397,7 +455,7 @@ def main() -> int:
                 "evidence_any@3": round(
                     sum(r["k3"]["evidence_any"] for r in rows) / len(rows), 4
                 ),
-                "mrr": round(sum(r["k3"]["rr"] for r in rows) / len(rows), 4),
+                "evidence_any_rr": round(sum(r["k3"]["rr"] for r in rows) / len(rows), 4),
             }
             for pair, rows in bm25_rows.items()
             if rows
@@ -413,22 +471,29 @@ def main() -> int:
             "golden_set": str(GOLDEN_PATH.relative_to(ROOT)),
             "golden_size": len(golden["cases"]),
             "evaluated_cases": len(case_rows),
+            "evaluated_standard_cases": len(qrels),
             "embedding_model": settings.EMBEDDING_MODEL,
             "llm_model": settings.LLM_MODEL,
             "git_commit": subprocess.check_output(
                 ["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, text=True
             ).strip(),
             "notes": [
-                "只评检索，不评生成；X01-X05 refusal 类不计算 Hit@K。",
-                "evidence_all@3 要求 gold_evidence 每一条都出现在 top3 正文。",
-                "PDF 与 DOCX 是同一份简历的重复导出，file_hit 仅作参考，主指标看 evidence。",
+                "标准指标由 ir_measures 计算：Success@3 / P@3 / Recall@3 / RR@3 / nDCG@3。",
+                "只有 behavior=answer 的题进入检索分母；refuse 和 report_conflict 单独列出。",
+                "evidence_all@3 是自定义严格口径（每条 gold_evidence 都出现在 top3 同一批正文），保留用于历史对齐。",
+                "evidence_any_rr 是旧字段 mrr 的准确名称：首个包含任一 evidence 的 chunk 的 reciprocal rank，不是标准 MRR。",
+                "PDF 与 DOCX 是同一份简历的重复导出，file_hit 仅作参考，主指标看 evidence/标准指标。",
                 "向量延迟包含网络 embedding 调用；第一次调用有冷启动。",
             ],
+            "refusal_case_ids": [c["id"] for c in groups["refusal"]],
+            "conflict_case_ids": [c["id"] for c in groups["conflict"]],
         },
         "summary": summary,
         "known_limits": golden.get("known_limits", []),
+        "qrels": qrels,
         "cases": case_rows,
-        "refusal_cases": [c for c in cases if not _case_for_retrieval(c)],
+        "refusal_cases": groups["refusal"],
+        "conflict_cases": groups["conflict"],
     }
 
     OUT_JSON.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -438,40 +503,56 @@ def main() -> int:
         "",
         f"- 生成时间：{payload['meta']['generated_at']}",
         f"- KB：`{KB_ID}` · {kb.name} · {chunk_count} chunks",
-        f"- Golden：{len(golden['cases'])} 条，检索可评 {len(case_rows)} 条，refusal {summary['refusal_cases']} 条",
+        f"- Golden：{len(golden['cases'])} 条；检索可评 {len(case_rows)} 条；refusal {summary['refusal_cases']} 条；conflict {summary['conflict_cases']} 条",
+        f"- invalid retrieval cases：{summary['invalid_cases'] or 'none'}",
         f"- Embedding：`{settings.EMBEDDING_MODEL}`；LLM：`{settings.LLM_MODEL}`；commit：`{payload['meta']['git_commit']}`",
         "",
-        "## 1. 三种检索模式对比",
+        "## 1. 标准检索指标（ir_measures）",
         "",
-        "| 模式 | evidence_all@3 | evidence_any@3 | MRR | 平均检索延迟(ms) |",
+        "| 模式 | Success@3 | P@3 | Recall@3 | RR@3 | nDCG@3 | 平均检索延迟(ms) |",
+        "| :--- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for mode in ("vector", "fulltext", "hybrid"):
+        row = summary["modes"][mode]
+        lines.append(
+            f"| {mode} | {row.get('Success@3', 0):.4f} | {row.get('P@3', 0):.4f} | "
+            f"{row.get('R@3', 0):.4f} | {row.get('RR@3', 0):.4f} | "
+            f"{row.get('nDCG@3', 0):.4f} | {row['latency_ms_mean']:.1f} |"
+        )
+    lines += [
+        "",
+        "## 1.1 兼容指标（自定义 evidence 口径）",
+        "",
+        "| 模式 | evidence_all@3 | evidence_any@3 | evidence_any_rr | file_hit@3 |",
         "| :--- | ---: | ---: | ---: | ---: |",
     ]
     for mode in ("vector", "fulltext", "hybrid"):
         row = summary["modes"][mode]
         lines.append(
-            f"| {mode} | {row['evidence_all@3']:.2%} | {row['evidence_any@3']:.2%} | {row['mrr']:.4f} | {row['latency_ms_mean']:.1f} |"
+            f"| {mode} | {row['evidence_all@3']:.2%} | {row['evidence_any@3']:.2%} | "
+            f"{row['evidence_any_rr']:.4f} | {row['file_hit@3']:.2%} |"
         )
     lines += [
         "",
         "## 2. Hybrid 权重扫描",
         "",
-        "| vector_weight | bm25_weight | evidence_all@3 | evidence_any@3 | MRR |",
+        "| vector_weight | bm25_weight | evidence_all@3 | evidence_any@3 | evidence_any_rr |",
         "| ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in summary["hybrid_weight_sweep"]:
         lines.append(
-            f"| {row['vector_weight']} | {row['bm25_weight']} | {row['evidence_all@3']:.2%} | {row['evidence_any@3']:.2%} | {row['mrr']:.4f} |"
+            f"| {row['vector_weight']} | {row['bm25_weight']} | {row['evidence_all@3']:.2%} | {row['evidence_any@3']:.2%} | {row['evidence_any_rr']:.4f} |"
         )
     lines += [
         "",
         "## 3. BM25 k1 / b 扫描",
         "",
-        "| k1 | b | evidence_all@3 | evidence_any@3 | MRR |",
+        "| k1 | b | evidence_all@3 | evidence_any@3 | evidence_any_rr |",
         "| ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in summary["bm25_grid"]:
         lines.append(
-            f"| {row['k1']} | {row['b']} | {row['evidence_all@3']:.2%} | {row['evidence_any@3']:.2%} | {row['mrr']:.4f} |"
+            f"| {row['k1']} | {row['b']} | {row['evidence_all@3']:.2%} | {row['evidence_any@3']:.2%} | {row['evidence_any_rr']:.4f} |"
         )
     lines += [
         "",
@@ -486,6 +567,22 @@ def main() -> int:
         lines.append(
             f"| {row['id']} | {row['category']} | {'✅' if row['hybrid_k3']['evidence_all'] else '❌'} | {'✅' if row['hybrid_k3']['file_hit'] else '❌'} | {top1.get('file','-')} | {snippet} |"
         )
+    if groups["conflict"]:
+        lines += [
+            "",
+            "## 4.1 Conflict cases（单独评测，不参与 Hit@K）",
+            "",
+        ]
+        for case in groups["conflict"]:
+            lines.append(f"- `{case['id']}`：{case['query']}")
+    if groups["refusal"]:
+        lines += [
+            "",
+            "## 4.2 Refusal cases（评生成端拒答，不参与 Hit@K）",
+            "",
+        ]
+        for case in groups["refusal"]:
+            lines.append(f"- `{case['id']}`：{case['query']}")
     lines += [
         "",
         "## 5. 已知限制（来自 golden 文件）",

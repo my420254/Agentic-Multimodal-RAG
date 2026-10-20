@@ -21,6 +21,8 @@ os.environ.setdefault(
 # 持久化专项测试会显式传入临时 SQLite engine 并 persistence=True。
 os.environ.setdefault("MEMORY_PERSISTENCE", "false")
 os.environ.setdefault("REQUEST_LOG_ENABLED", "false")
+# 测试进程不访问 Langfuse Cloud；tracing 的 no-op/异常传播由 test_tracing.py 单独覆盖。
+os.environ.setdefault("LANGFUSE_ENABLED", "false")
 
 from app.main import app
 from app.core.database import engine, get_session

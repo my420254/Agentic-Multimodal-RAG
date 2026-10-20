@@ -11,14 +11,17 @@ import aiofiles
 from datetime import datetime
 
 from app.core.database import get_session
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_route_scope
 from app.core.access import get_visible_chunk, get_visible_file, get_visible_kb
 from app.core.config import get_settings
 from app.models import KnowledgeBase, FileDocument, FileStatus, generate_uuid, DocumentChunk, User
 from app.schemas import FileUploadResponse, FileStatusResponse, FileTextResponse, ApiResponse
 from app.tasks.parse_tasks import process_file_parsing
 
-router = APIRouter(tags=["File"], dependencies=[Depends(get_current_user)])
+router = APIRouter(
+    tags=["File"],
+    dependencies=[Depends(get_current_user), Depends(require_route_scope)],
+)
 settings = get_settings()
 
 

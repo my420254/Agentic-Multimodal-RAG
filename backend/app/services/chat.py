@@ -27,6 +27,7 @@ import time
 import json
 import re
 from app.core.config import get_settings
+from app.core.tracing import tracer
 
 settings = get_settings()
 
@@ -87,14 +88,24 @@ class ChatService:
                 rerank_model = session.get(CustomModel, rerank_model_id)
 
             rerank_service = RerankService(session)
-            results = batch_rerank(
-                query=query,
-                candidates=results,
-                rerank_service=rerank_service,
-                model=rerank_model,
-                top_k=rerank_top_k,
-                score_threshold=rerank_score_threshold
-            )
+            with tracer.observation(
+                "rerank",
+                input={"query": query, "candidates": len(results)},
+                metadata={
+                    "top_k": rerank_top_k,
+                    "score_threshold": rerank_score_threshold,
+                    "model_id": rerank_model_id,
+                },
+            ) as span:
+                results = batch_rerank(
+                    query=query,
+                    candidates=results,
+                    rerank_service=rerank_service,
+                    model=rerank_model,
+                    top_k=rerank_top_k,
+                    score_threshold=rerank_score_threshold
+                )
+                tracer.update(span, output={"count": len(results)})
             metrics["rerank_count"] = len(results)
 
         # 3. 上下文扩展
@@ -236,6 +247,7 @@ class ChatService:
         session_id: str = None,
         *,
         user_id: str,
+        langfuse_handler: Any = None,
     ) -> AsyncGenerator[Tuple[str, Dict[str, Any]], None]:
         """
         普通模式：
@@ -506,6 +518,7 @@ class ChatService:
         top_k: int,
         score_threshold: float,
         model_id: str,
+        langfuse_handler: Any = None,
         **kwargs
     ) -> AsyncGenerator[Tuple[str, Dict[str, Any]], None]:
         """
@@ -607,7 +620,11 @@ class ChatService:
                     print(f"DEBUG_MEMORY: Write L1 memory in langgraph failed: {e}")
         
         try:
-            async for event in workflow.app.astream_events(initial_state, version="v1"):
+            async for event in workflow.app.astream_events(
+                initial_state,
+                version="v1",
+                config={"callbacks": [langfuse_handler]} if langfuse_handler else None,
+            ):
                 kind = event["event"]
                 name = event["name"]
                 data = event["data"]
@@ -714,6 +731,7 @@ class ChatService:
         session_id: str = None,
         *,
         user_id: str,
+        langfuse_handler: Any = None,
     ) -> AsyncGenerator[Tuple[str, Dict[str, Any]], None]:
         """
         流式对话
@@ -759,6 +777,7 @@ class ChatService:
                 context_window=context_window,
                 session_id=session_id,
                 user_id=user_id,
+                langfuse_handler=langfuse_handler,
             ):
                 yield item
         else:
@@ -780,5 +799,6 @@ class ChatService:
                 use_rewrite=use_rewrite,
                 session_id=session_id,
                 user_id=user_id,
+                langfuse_handler=langfuse_handler,
             ):
                 yield item

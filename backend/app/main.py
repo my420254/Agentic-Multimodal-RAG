@@ -8,17 +8,25 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, Response
 from fastapi.routing import APIRoute
 from contextlib import asynccontextmanager
+import logging
 import os
 import time
+import uuid
+
+import httpx
+import redis
+from sqlalchemy import text
 from sqlmodel import Session
 
 from app.core.config import get_settings, ensure_directories
 from app.core.database import engine, init_db
 from app.core.metrics import metrics_payload, observe_http
+from app.core.tracing import tracer
 from app.models import RequestLog
 from app.api import api_router
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -36,7 +44,8 @@ async def lifespan(app: FastAPI):
             print(f"   {route.methods} {route.path}")
 
     yield
-    # 关闭时执行
+    # 关闭时执行：把 Langfuse 缓冲区中的 trace 发出去
+    tracer.shutdown()
     print("应用关闭")
 
 
@@ -51,7 +60,7 @@ app = FastAPI(
 # CORS 配置
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 生产环境应限制具体域名
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -69,16 +78,15 @@ app.include_router(api_router)
 # 调试：中间件记录请求
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    import sys
-    import uuid
-
-    sys.stdout.flush()
+    request_id = request.headers.get("X-Request-Id") or f"req_{uuid.uuid4().hex}"
+    request.state.request_id = request_id
     start = time.perf_counter()
-    print(f"[Request] {request.method} {request.url.path}")
+    print(f"[Request] {request_id} {request.method} {request.url.path}")
     status_code = 500
     try:
         response = await call_next(request)
         status_code = response.status_code
+        response.headers["X-Request-Id"] = request_id
         return response
     finally:
         duration = time.perf_counter() - start
@@ -101,8 +109,10 @@ async def log_requests(request: Request, call_next):
                     session.commit()
             except Exception as e:
                 print(f"[RequestLog] skip: {e}")
-        print(f"[Response] {status_code} {request.url.path} ({duration * 1000:.1f}ms)")
-        sys.stdout.flush()
+        print(
+            f"[Response] {request_id} {status_code} {request.url.path} "
+            f"({duration * 1000:.1f}ms)"
+        )
 
 # 静态文件服务（图片预览）
 if os.path.exists(settings.IMAGE_DIR):
@@ -113,24 +123,107 @@ if os.path.exists(settings.IMAGE_DIR):
     )
 
 
-# 全局异常处理
+# 全局异常处理：不把内部异常文本返回给客户端，只返回 request_id 供日志排查。
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """全局异常处理器"""
-    return JSONResponse(
-        status_code=500,
-        content={
-            "code": 50000,
-            "message": f"服务器内部错误: {str(exc)}",
-        },
+    request_id = getattr(request.state, "request_id", None)
+    logger.error(
+        "Unhandled exception request_id=%s method=%s path=%s",
+        request_id,
+        request.method,
+        request.url.path,
+        exc_info=(type(exc), exc, exc.__traceback__),
     )
+    content = {
+        "code": 50000,
+        "message": "服务器内部错误，请稍后重试",
+        "request_id": request_id,
+    }
+    headers = {"X-Request-Id": request_id} if request_id else None
+    return JSONResponse(status_code=500, content=content, headers=headers)
 
 
-# 健康检查
+# 健康检查（liveness）：只表示进程活着
 @app.get("/health")
 async def health_check():
     """健康检查接口"""
     return {"status": "ok"}
+
+
+async def _check_postgres() -> tuple[str, str | None]:
+    try:
+        with Session(engine) as session:
+            session.connection().execute(text("SELECT 1"))
+        return "ok", None
+    except Exception as exc:
+        return "error", type(exc).__name__
+
+
+async def _check_redis() -> tuple[str, str | None]:
+    client = None
+    try:
+        client = redis.Redis.from_url(
+            settings.REDIS_URL,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+        )
+        client.ping()
+        return "ok", None
+    except Exception as exc:
+        return "error", type(exc).__name__
+    finally:
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
+
+
+async def _check_llm() -> tuple[str, str | None]:
+    if not settings.READY_CHECK_LLM:
+        return "skipped", None
+    try:
+        base = settings.LLM_BASE_URL.rstrip("/")
+        async with httpx.AsyncClient(timeout=2.0, trust_env=True) as client:
+            response = await client.get(
+                f"{base}/models",
+                headers={"Authorization": f"Bearer {settings.LLM_API_KEY}"},
+            )
+            response.raise_for_status()
+        return "ok", None
+    except Exception as exc:
+        return "error", type(exc).__name__
+
+
+# 就绪检查（readiness）：PG / Redis 是硬依赖；LLM 默认只标记 degraded
+@app.get("/ready")
+async def readiness_check():
+    checks: dict[str, str] = {}
+    errors: dict[str, str] = {}
+    for name, checker in (
+        ("postgres", _check_postgres),
+        ("redis", _check_redis),
+        ("llm", _check_llm),
+    ):
+        status, error = await checker()
+        checks[name] = status
+        if error:
+            errors[name] = error
+
+    critical_ok = checks["postgres"] == "ok" and checks["redis"] == "ok"
+    if settings.READY_REQUIRE_LLM:
+        critical_ok = critical_ok and checks["llm"] == "ok"
+    if not critical_ok:
+        overall = "unavailable"
+    elif any(value == "error" for value in checks.values()):
+        overall = "degraded"
+    else:
+        overall = "ok"
+
+    return JSONResponse(
+        status_code=200 if critical_ok else 503,
+        content={"status": overall, "checks": checks, "errors": errors},
+    )
 
 
 # 根路径

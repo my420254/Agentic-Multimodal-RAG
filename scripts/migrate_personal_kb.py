@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-把 legacy `backend/local.db` 里的“张梦洋个人资料”知识库迁移到 PostgreSQL。
+把 legacy `backend/local.db` 里的个人资料知识库迁移到 PostgreSQL。
 
 背景：
 - 4 份真实上传材料在 backend/storage/uploads/...，但 PostgreSQL 里只有 SRE 文档；
@@ -40,7 +40,8 @@ from app.services.bm25 import BM25Index  # noqa: E402
 
 LEGACY_DB = BACKEND_DIR / "local.db"
 KB_ID = "6d3e18a1-f70a-4acc-80a6-65eaea9a7a69"
-KB_NAME = "张梦洋 · 简历与项目材料（真实数据）"
+# 真实知识库名称只在本地设置，不写进仓库
+KB_NAME = os.environ.get("PERSONAL_KB_NAME", "个人简历与项目材料")
 EXPECTED_CHUNKS = 209
 
 

@@ -10,7 +10,7 @@ import json
 import time
 
 from app.core.database import get_session
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_route_scope
 from app.core.access import get_visible_kb, visible_kb_ids_for_user
 from app.models import KnowledgeBase, User
 from app.schemas import (
@@ -23,8 +23,12 @@ from app.services.chat import ChatService
 from app.services.llm import LLMService
 from app.services.memory_service import memory_service
 from app.services.trace_service import new_trace_id, record_agent_trace
+from app.core.tracing import tracer
 
-router = APIRouter(tags=["Chat"])
+router = APIRouter(
+    tags=["Chat"],
+    dependencies=[Depends(require_route_scope)],
+)
 
 
 @router.post("/chat/rewrite", response_model=ApiResponse[RewriteResponse])
@@ -79,7 +83,7 @@ async def chat_completions(
         return ""
 
     async def generate_sse(current_trace_id: str) -> AsyncGenerator[str, None]:
-        """生成 SSE 事件流，并在结束时落一条 Agent trace。"""
+        """生成 SSE 事件流，并在结束时落一条本地 trace + 可选 Langfuse trace。"""
         chat_service = ChatService()
         started = time.perf_counter()
         first_token_at = None
@@ -88,69 +92,104 @@ async def chat_completions(
         steps = []
         error_text = None
 
-        try:
-            async for event_type, event_data in chat_service.chat_stream(
-                messages=data.messages,
-                kb_ids=effective_kb_ids,
-                use_rewrite=data.use_rewrite,
-                mode=data.mode,
-                top_k=data.top_k,
-                score_threshold=data.score_threshold,
-                model_id=data.model_id,
-                rerank_enabled=data.rerank_enabled,
-                rerank_score_threshold=data.rerank_score_threshold,
-                rerank_model_id=data.rerank_model_id,
-                # 新增检索参数
-                search_mode=data.search_mode,
-                vector_weight=data.vector_weight,
-                bm25_weight=data.bm25_weight,
-                rerank_top_k=data.rerank_top_k,
-                context_window=data.context_window,
-                session_id=data.session_id,
-                user_id=uid,
-            ):
-                if event_type == "answer_chunk":
-                    if first_token_at is None:
-                        first_token_at = time.perf_counter()
-                    answer_parts.append(str(event_data.get("content", "")))
-                elif event_type == "rag_result":
-                    citations = event_data.get("citations", []) or citations
-                elif event_type == "agent_thought":
-                    steps.append(event_data)
-                elif event_type == "error":
-                    error_text = str(event_data.get("error", ""))
-                elif event_type == "done":
-                    event_data = {**event_data, "trace_id": current_trace_id}
+        with tracer.trace(
+            name="chat.request",
+            user_id=uid,
+            session_id=data.session_id,
+            input={"query": _last_user_query()},
+            metadata={
+                "local_trace_id": current_trace_id,
+                "mode": data.mode,
+                "kb_ids": effective_kb_ids,
+                "model_id": data.model_id,
+                "search_mode": data.search_mode,
+            },
+        ) as root:
+            langfuse_trace_id = tracer.current_trace_id()
+            langfuse_handler = tracer.callback_handler(langfuse_trace_id)
 
-                # 格式化 SSE 事件
-                yield f"event: {event_type}\n"
-                yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+            try:
+                async for event_type, event_data in chat_service.chat_stream(
+                    messages=data.messages,
+                    kb_ids=effective_kb_ids,
+                    use_rewrite=data.use_rewrite,
+                    mode=data.mode,
+                    top_k=data.top_k,
+                    score_threshold=data.score_threshold,
+                    model_id=data.model_id,
+                    rerank_enabled=data.rerank_enabled,
+                    rerank_score_threshold=data.rerank_score_threshold,
+                    rerank_model_id=data.rerank_model_id,
+                    # 新增检索参数
+                    search_mode=data.search_mode,
+                    vector_weight=data.vector_weight,
+                    bm25_weight=data.bm25_weight,
+                    rerank_top_k=data.rerank_top_k,
+                    context_window=data.context_window,
+                    session_id=data.session_id,
+                    user_id=uid,
+                    langfuse_handler=langfuse_handler,
+                ):
+                    if event_type == "answer_chunk":
+                        if first_token_at is None:
+                            first_token_at = time.perf_counter()
+                        answer_parts.append(str(event_data.get("content", "")))
+                    elif event_type == "rag_result":
+                        citations = event_data.get("citations", []) or citations
+                    elif event_type == "agent_thought":
+                        steps.append(event_data)
+                    elif event_type == "error":
+                        error_text = str(event_data.get("error", ""))
+                    elif event_type == "done":
+                        event_data = {
+                            **event_data,
+                            "trace_id": current_trace_id,
+                            "langfuse_trace_id": langfuse_trace_id,
+                        }
 
-        except Exception as e:
-            error_text = str(e)
-            # 发送错误事件
-            error_data = {"error": str(e), "trace_id": current_trace_id}
-            yield f"event: error\n"
-            yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
-        finally:
-            total_ms = (time.perf_counter() - started) * 1000
-            ttft_ms = ((first_token_at - started) * 1000) if first_token_at is not None else None
-            record_agent_trace(
-                trace_id=current_trace_id,
-                user_id=uid,
-                session_id=data.session_id,
-                mode=data.mode,
-                query=_last_user_query(),
-                answer="".join(answer_parts),
-                kb_ids=effective_kb_ids,
-                model_id=data.model_id,
-                prompt_version=None,
-                citations=citations,
-                steps=steps,
-                ttft_ms=ttft_ms,
-                total_ms=total_ms,
-                error=error_text,
-            )
+                    # 格式化 SSE 事件
+                    yield f"event: {event_type}\n"
+                    yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+
+            except Exception as e:
+                error_text = str(e)
+                # 发送错误事件
+                error_data = {
+                    "error": str(e),
+                    "trace_id": current_trace_id,
+                    "langfuse_trace_id": langfuse_trace_id,
+                }
+                yield f"event: error\n"
+                yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+            finally:
+                total_ms = (time.perf_counter() - started) * 1000
+                ttft_ms = ((first_token_at - started) * 1000) if first_token_at is not None else None
+                record_agent_trace(
+                    trace_id=current_trace_id,
+                    user_id=uid,
+                    session_id=data.session_id,
+                    mode=data.mode,
+                    query=_last_user_query(),
+                    answer="".join(answer_parts),
+                    kb_ids=effective_kb_ids,
+                    model_id=data.model_id,
+                    prompt_version=None,
+                    citations=citations,
+                    steps=steps,
+                    ttft_ms=ttft_ms,
+                    total_ms=total_ms,
+                    error=error_text,
+                )
+                tracer.update(
+                    root,
+                    output={"answer": "".join(answer_parts)},
+                    metadata={
+                        "citations": len(citations),
+                        "ttft_ms": round(ttft_ms, 2) if ttft_ms is not None else None,
+                        "total_ms": round(total_ms, 2),
+                        "error": error_text,
+                    },
+                )
 
     return StreamingResponse(
         generate_sse(trace_id),

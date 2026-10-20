@@ -5,7 +5,7 @@
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 from functools import lru_cache
-from typing import List
+from typing import List, Optional
 import os
 
 
@@ -40,6 +40,16 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8000
     ENV: str = "dev"
+    # PostgreSQL 启动时自动执行 Alembic upgrade head；生产多实例建议 false，独立跑 migration
+    AUTO_MIGRATE: bool = True
+    # 逗号分隔；不要在生产使用 *。前端默认 3000，Vite 默认 5173。
+    CORS_ORIGINS: str = (
+        "http://127.0.0.1:3000,http://localhost:3000,"
+        "http://127.0.0.1:5173,http://localhost:5173"
+    )
+    # /ready：LLM 不可用是否视为未就绪；默认只标记 degraded
+    READY_REQUIRE_LLM: bool = False
+    READY_CHECK_LLM: bool = True
 
     # 数据库与存储 (生产级 PostgreSQL + Redis)
     DATABASE_URL: str = "postgresql+psycopg2://postgres:postgres@localhost:5432/agent_db"
@@ -128,6 +138,19 @@ class Settings(BaseSettings):
     # false：兼容旧行为，仅 Redis/内存（测试可关闭，避免污染 agent_db）。
     MEMORY_PERSISTENCE: bool = True
 
+    # ==================== Langfuse / tracing ====================
+    # 没有 public/secret key 时自动 no-op，不影响聊天与测试。
+    LANGFUSE_ENABLED: bool = True
+    LANGFUSE_PUBLIC_KEY: Optional[str] = None
+    LANGFUSE_SECRET_KEY: Optional[str] = None
+    LANGFUSE_HOST: str = "https://cloud.langfuse.com"
+    # metadata：只发长度/ID；redacted：正则脱敏后发送；full：仅自托管环境
+    TRACE_CONTENT_MODE: str = "redacted"
+    # Prompt Management：production label + 本地缓存 + 失败回退代码默认值
+    LANGFUSE_PROMPT_LABEL: str = "production"
+    LANGFUSE_PROMPT_CACHE_TTL: int = 300
+    LANGFUSE_PROMPT_FETCH_TIMEOUT: float = 2.0
+
     @field_validator("JWT_SECRET")
     @classmethod
     def validate_jwt_secret(cls, value: str) -> str:
@@ -151,6 +174,18 @@ class Settings(BaseSettings):
         if value <= 0:
             raise ValueError("ACCESS_TTL_MIN / REFRESH_TTL_DAYS 必须为正整数")
         return value
+
+    @field_validator("TRACE_CONTENT_MODE")
+    @classmethod
+    def validate_trace_content_mode(cls, value: str) -> str:
+        value = value.strip().lower()
+        if value not in {"metadata", "redacted", "full"}:
+            raise ValueError("TRACE_CONTENT_MODE 必须是 metadata / redacted / full")
+        return value
+
+    @property
+    def cors_origins(self) -> List[str]:
+        return [item.strip() for item in self.CORS_ORIGINS.split(",") if item.strip()]
 
     class Config:
         env_file = (".env", "backend/.env")

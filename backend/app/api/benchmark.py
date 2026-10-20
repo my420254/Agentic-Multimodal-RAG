@@ -1,22 +1,22 @@
 """
 Benchmark 评测与消融指标 API
-提供评测历史记录、消融对比数据、LLM-as-a-Judge 质量打分与最新评测报告查询
+只提供已持久化的评测记录与报告查询；没有记录时返回空结果，不返回演示数据。
 """
 
 import os
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
 from app.core.database import get_session
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_route_scope
 from app.models.models import BenchmarkRecord
 from app.schemas.schemas import ApiResponse
 
 router = APIRouter(
     prefix="/benchmark",
     tags=["Benchmark & Evaluation"],
-    dependencies=[Depends(get_current_user)],
+    dependencies=[Depends(get_current_user), Depends(require_route_scope)],
 )
 
 REPORT_PATH = os.path.abspath(
@@ -31,50 +31,13 @@ async def list_benchmark_records(session: Session = Depends(get_session)):
         select(BenchmarkRecord).order_by(BenchmarkRecord.created_at.desc())
     ).all()
 
-    # 如果数据库尚无持久化记录，提取上一次评测的消融基准数据作为初始化数据返回
+    # 不再返回硬编码的演示数据：没有记录就诚实返回空列表。
     if not records:
-        mock_records = [
-            {
-                "id": "rec_ablation_plan1",
-                "plan_name": "方案 1: Baseline (纯向量检索 / 无重排)",
-                "dataset_name": "SRE Golden Benchmark 50",
-                "total_cases": 15,
-                "success_rate": 73.3,
-                "hit_rate": 87.6,
-                "hallucination_count": 2,
-                "avg_latency": 5.04,
-                "avg_tokens": 3017,
-                "llm_judge_score": 3.6,
-                "created_at": "2026-10-17T23:50:00Z"
-            },
-            {
-                "id": "rec_ablation_plan2",
-                "plan_name": "方案 2: Hybrid + Rerank (双路召回 + BGE重排)",
-                "dataset_name": "SRE Golden Benchmark 50",
-                "total_cases": 15,
-                "success_rate": 33.3,
-                "hit_rate": 47.0,
-                "hallucination_count": 2,
-                "avg_latency": 3.71,
-                "avg_tokens": 971,
-                "llm_judge_score": 3.8,
-                "created_at": "2026-10-17T23:50:00Z"
-            },
-            {
-                "id": "rec_ablation_plan3",
-                "plan_name": "方案 3: Full Agentic (意图路由 + 护栏反思 + 3层记忆)",
-                "dataset_name": "SRE Golden Benchmark 50",
-                "total_cases": 15,
-                "success_rate": 53.3,
-                "hit_rate": 60.9,
-                "hallucination_count": 1,
-                "avg_latency": 13.00,
-                "avg_tokens": 1773,
-                "llm_judge_score": 4.6,
-                "created_at": "2026-10-17T23:50:00Z"
-            }
-        ]
-        return ApiResponse(code=200, message="success", data=mock_records)
+        return ApiResponse(
+            code=200,
+            message="no benchmark records; run benchmark scripts first",
+            data=[],
+        )
 
     data = [
         {
@@ -96,30 +59,32 @@ async def list_benchmark_records(session: Session = Depends(get_session)):
 
 
 @router.get("/latest", response_model=ApiResponse[Dict[str, Any]])
-async def get_latest_benchmark_summary():
-    """获取最新一次消融评测概要与 LLM-as-a-Judge 多维质量评分"""
+async def get_latest_benchmark_summary(session: Session = Depends(get_session)):
+    """获取最新一条持久化评测记录；没有记录时返回空结果，不再编造指标。"""
+    record = session.exec(
+        select(BenchmarkRecord).order_by(BenchmarkRecord.created_at.desc()).limit(1)
+    ).first()
+    if record is None:
+        return ApiResponse(
+            code=200,
+            message="no benchmark records; run benchmark scripts first",
+            data={},
+        )
     return ApiResponse(
         code=200,
         message="success",
         data={
-            "dataset_name": "云原生SRE排障 50 题分级黄金评测集",
-            "eval_timestamp": "2026-10-17 23:50:00",
-            "dimensions": {
-                "factual_sop": 25,
-                "multihop_incident": 15,
-                "adversarial_security": 7,
-                "fastpath_routing": 3
-            },
-            "llm_judge_metrics": {
-                "faithfulness_avg": 4.7,
-                "answer_relevance_avg": 4.8,
-                "executable_completeness_avg": 4.6,
-                "overall_pass_rate": 93.3,
-                "judge_model": "Qwen / DeepSeek (G-Eval Rubric)"
-            },
-            "best_configuration": "Hybrid RAG + BGE-Reranker + LangGraph Reflexion",
-            "token_reduction_vs_baseline": "41% ~ 67%"
-        }
+            "plan_name": record.plan_name,
+            "dataset_name": record.dataset_name,
+            "eval_timestamp": record.created_at.isoformat() if record.created_at else None,
+            "total_cases": record.total_cases,
+            "success_rate": record.success_rate,
+            "hit_rate": record.hit_rate,
+            "hallucination_count": record.hallucination_count,
+            "avg_latency": record.avg_latency,
+            "avg_tokens": record.avg_tokens,
+            "llm_judge_score": record.llm_judge_score,
+        },
     )
 
 

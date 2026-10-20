@@ -80,6 +80,11 @@ def split_markdown_into_chunks(text: str, chunk_size: int = 500, overlap: int = 
 
 
 async def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--only", default=None, help="只入库指定文件名，例如 05_xxx.md")
+    args = parser.parse_args()
+
     print("🚀 [Ingest] 开始真实企业级 SRE 知识库初始化...")
     init_db()
     
@@ -106,8 +111,13 @@ async def main():
         else:
             print(f"ℹ️ 知识库已存在: {KB_NAME} ({KB_ID})")
 
-        # 2. 遍历扫描所有 SOP 文档
+        # 2. 遍历扫描所有 SOP 文档（支持 --only 单文件更新）
         md_files = glob.glob(os.path.join(DOC_DIR, "*.md"))
+        if args.only:
+            md_files = [p for p in md_files if os.path.basename(p) == args.only]
+        if not md_files:
+            print(f"❌ 没有找到待入库文档: {args.only or DOC_DIR}")
+            return 2
         print(f"📂 发现 {len(md_files)} 份企业级 SOP 文档待入库: {md_files}")
         
         all_doc_chunks = []

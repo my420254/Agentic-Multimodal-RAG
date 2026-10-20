@@ -24,6 +24,7 @@ from app.services.embedding import EmbeddingService
 from app.services.bm25 import BM25Index, get_bm25_index
 from app.core.config import get_settings
 from app.core.metrics import observe_retrieval
+from app.core.tracing import tracer
 
 settings = get_settings()
 
@@ -272,60 +273,86 @@ class RetrievalService:
                 observe_retrieval("cache_hit", 0.0)
                 return cached, {"from_cache": True}
 
-        results = []
-        fallback_used = False
+        with tracer.observation(
+            "retrieval.search",
+            as_type="retriever",
+            input={
+                "query": query,
+                "kb_ids": kb_ids,
+                "search_mode": search_mode,
+                "top_k": top_k,
+            },
+            metadata={
+                "score_threshold": score_threshold,
+                "vector_weight": vector_weight,
+                "bm25_weight": bm25_weight,
+            },
+        ) as span:
+            results = []
+            fallback_used = False
 
-        try:
-            if search_mode == "vector":
-                results, metrics = await self._vector_search(
-                    session, query, kb_ids, top_k, score_threshold
-                )
-            elif search_mode == "fulltext":
-                results, metrics = await self._bm25_search(
-                    session, query, kb_ids, top_k
-                )
-            elif search_mode == "hybrid":
-                results, metrics, fallback_used = await self._hybrid_search(
-                    session, query, kb_ids, top_k, score_threshold,
-                    vector_weight, bm25_weight
-                )
-            else:
-                raise ValueError(f"未知的检索模式: {search_mode}")
-
-        except Exception as e:
-            print(f"❌ [Retrieval] 检索失败: {e}")
-            # 降级处理：尝试其他模式
-            if search_mode == "hybrid":
-                try:
-                    print(f"⚠️ [Retrieval] 降级为向量检索")
+            try:
+                if search_mode == "vector":
                     results, metrics = await self._vector_search(
                         session, query, kb_ids, top_k, score_threshold
                     )
-                    fallback_used = True
-                except Exception:
-                    results = []
+                elif search_mode == "fulltext":
+                    results, metrics = await self._bm25_search(
+                        session, query, kb_ids, top_k
+                    )
+                elif search_mode == "hybrid":
+                    results, metrics, fallback_used = await self._hybrid_search(
+                        session, query, kb_ids, top_k, score_threshold,
+                        vector_weight, bm25_weight
+                    )
+                else:
+                    raise ValueError(f"未知的检索模式: {search_mode}")
 
-        # 去重
-        results = deduplicate_results(results)
+            except Exception as e:
+                print(f"❌ [Retrieval] 检索失败: {e}")
+                # 降级处理：尝试其他模式
+                if search_mode == "hybrid":
+                    try:
+                        print(f"⚠️ [Retrieval] 降级为向量检索")
+                        results, metrics = await self._vector_search(
+                            session, query, kb_ids, top_k, score_threshold
+                        )
+                        fallback_used = True
+                    except Exception:
+                        results = []
 
-        # 计算总耗时
-        total_latency = (time.time() - start_time) * 1000
-        metrics["total_latency_ms"] = total_latency
-        metrics["final_count"] = len(results)
-        metrics["fallback_used"] = fallback_used
+            # 去重
+            results = deduplicate_results(results)
 
-        # 缓存结果
-        if use_cache and results:
-            self.cache.set(query, kb_ids, search_mode, top_k, results, cache_params)
+            # 计算总耗时
+            total_latency = (time.time() - start_time) * 1000
+            metrics["total_latency_ms"] = total_latency
+            metrics["final_count"] = len(results)
+            metrics["fallback_used"] = fallback_used
 
-        # 记录检索日志
-        if log_retrieval:
-            self._log_retrieval(
-                session, query, kb_ids, search_mode, top_k, score_threshold,
-                vector_weight, bm25_weight, metrics, results
+            # 缓存结果
+            if use_cache and results:
+                self.cache.set(query, kb_ids, search_mode, top_k, results, cache_params)
+
+            # 记录检索日志
+            if log_retrieval:
+                self._log_retrieval(
+                    session, query, kb_ids, search_mode, top_k, score_threshold,
+                    vector_weight, bm25_weight, metrics, results
+                )
+
+            tracer.update(
+                span,
+                output={"count": len(results)},
+                metadata={
+                    "vector_count": metrics.get("vector_count", 0),
+                    "bm25_count": metrics.get("bm25_count", 0),
+                    "merged_count": metrics.get("merged_count", 0),
+                    "total_latency_ms": round(total_latency, 2),
+                    "fallback_used": fallback_used,
+                },
             )
-
-        return results, metrics
+            return results, metrics
 
     async def _vector_search(
         self,

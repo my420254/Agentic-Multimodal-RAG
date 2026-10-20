@@ -15,7 +15,7 @@ from app.services.mock_interview import mock_interview_service, InterviewTurnRes
 from app.services.prompt_service import prompt_workshop_service
 from app.services.parser import FileParser
 from app.core.rate_limiter import global_rate_limiter
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_route_scope
 from app.core.access import get_visible_file, get_visible_kb, visible_kb_ids_for_user
 from app.core.database import get_session
 from app.models import KnowledgeBase, User
@@ -24,7 +24,7 @@ from sqlmodel import Session, select
 router = APIRouter(
     prefix="/career",
     tags=["Career & Interview Agent"],
-    dependencies=[Depends(get_current_user)],
+    dependencies=[Depends(get_current_user), Depends(require_route_scope)],
 )
 
 

@@ -10,6 +10,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/React-TypeScript-149ECA?logo=react&logoColor=white)](https://react.dev/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-Agent-1C3C3C)](https://github.com/langchain-ai/langgraph)
+[![CI](https://github.com/futureYYY/Agentic-Multimodal-RAG/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/futureYYY/Agentic-Multimodal-RAG/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-MIT-black.svg)](LICENSE)
 
 [功能亮点](#功能亮点) · [界面预览](#界面预览) · [工作流程](#工作流程) · [快速开始](#快速开始)
@@ -32,15 +33,16 @@
 ## 功能亮点
 
 - **多模态文档解析**：提取正文、标题层级、表格与图片内容，并保留文档结构信息。
-- **查询增强与并行召回**：支持复杂问题拆分、HyDE 假设文档生成，并针对多个子问题并行执行检索。
+- **检索质量反思与有限重试**：Agent 对召回结果做相关性评分，低于阈值时改写 query 重试，最多 3 次，并带重复调用熔断。
 - **双路混合检索**：结合 pgvector 向量检索和 BM25 关键词检索，兼顾语义理解与精确关键词命中；Chroma 仅保留回滚/对比。
 - **父子 Chunk 与上下文恢复**：命中子 Chunk 后可拼接父文档及相邻 Chunk，减少孤立片段带来的语义缺失。
 - **本地与远程双模式 Rerank**：本地 Cross-Encoder 自动选择 CUDA 或 CPU，也可接入远程 Rerank API。
-- **可解释的 Agent 执行轨迹**：基于 LangGraph 展示意图分析、任务拆分、工具调用、检索耗时、质量判断和低相关性重试。
+- **可解释的 Agent 执行轨迹**：基于 LangGraph 展示意图分析、工具调用、检索耗时、质量判断和低相关性重试。
 - **图文联合召回**：图片描述和文本 Chunk 可统一进入检索流程，回答中保留引用来源。
-- **异步文档处理链路**：可通过 Celery 与 Redis 在后台执行文档解析、图片理解和向量化任务。
+- **异步文档处理链路**：可通过 Celery 与 Redis 在后台执行文档解析、图片理解和向量化任务；开发环境默认同步兜底。
 - **模型能力解耦**：LLM、Embedding、VLM 与 Rerank 分别配置，可自由组合本地模型和兼容 API 服务。
 - **召回质量分析**：在 Web UI 中查看 Top K、相似度、召回详情、耗时及检索历史。
+- **可选 LLM 可观测性**：可接入 Langfuse（Cloud Hobby 免费版）追踪 retrieval、tool、LLM、rerank span；Agent prompt 由 Langfuse production label 管理，代码默认值作为 fallback；未配置 key 时自动 no-op，本地 `agent_traces` 继续作为 fallback。
 
 ## 界面预览
 
@@ -52,7 +54,7 @@
 
 ### 2. Agent 思考与检索过程
 
-Agent 会分析意图、拆分子问题、生成检索查询、调用工具并记录每一步耗时。
+Agent 会分析意图、生成检索查询、调用工具并记录每一步耗时。
 
 ![Agent 思考与检索过程](docs/assets/agent-reasoning.png)
 
@@ -136,6 +138,14 @@ Parser -> Chunk -> Index    Intent -> Retrieve -> Observe -> Retry
 - Models：Ollama 或 OpenAI-compatible API
 - Storage：PostgreSQL（含 pgvector）、Redis、文件存储；Chroma 仅回滚
 
+## 评测与可观测性
+
+- **检索指标**：标准 `Success@3` / `P@3` / `Recall@3` / `RR@3` / `nDCG@3` 由 `ir_measures` 计算；`evidence_all@3` 等自定义口径保留用于历史对齐；
+- **Golden 体检**：`python benchmark/validate_golden.py --golden ... --kb-id ...`；
+- **Langfuse（可选）**：配置 `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` 后，聊天会记录 retrieval、tool、LLM、rerank span；未配置时自动 no-op；
+- **Dataset / Experiment**：求职域合成简历用例可用 `python benchmark/langfuse_career_dataset.py --run-experiment` 上传并跑 baseline；
+- **PII**：真实简历相关 trace 建议 `TRACE_CONTENT_MODE=metadata`，或使用自托管 Langfuse；不要把原始简历正文发到 Cloud。
+
 ## 快速开始
 
 ### 环境要求
@@ -168,6 +178,9 @@ pip install -r requirements.txt \
   --extra-index-url https://download.pytorch.org/whl/cu118
 copy backend\.env.example backend\.env  # Windows
 # cp backend/.env.example backend/.env   # Linux / macOS
+
+# JWT_SECRET 必填（至少 32 字符），写入 backend/.env
+python3 -c "import secrets; print('JWT_SECRET=' + secrets.token_urlsafe(48))"
 
 cd backend
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
@@ -202,6 +215,18 @@ npm run dev
 > 本地 Rerank 模型会自动选择 `cuda` 或 `cpu`；使用远程 Rerank API 时，FastAPI 进程不加载本地模型。
 >
 > 当前依赖文件固定了 PyTorch CUDA 11.8 构建，因此安装命令包含 PyTorch 官方索引。没有 NVIDIA GPU 时仍可运行 CPU 回退路径，但依赖体积会更大。
+
+### 4. Docker Compose（可选）
+
+```bash
+export JWT_SECRET="$(python3 -c 'import secrets;print(secrets.token_urlsafe(48))')"
+docker compose build
+docker compose up -d
+curl http://127.0.0.1:8000/ready
+```
+
+前端：`http://127.0.0.1:3000`，后端：`http://127.0.0.1:8000`。  
+使用宿主机 Ollama 时，把 `backend/.env` 的 `LLM_BASE_URL` / `EMBEDDING_BASE_URL` 改为 `http://host.docker.internal:11434/v1`。更多说明见 [`docs/DOCKER.md`](docs/DOCKER.md)。
 
 ## 项目结构
 

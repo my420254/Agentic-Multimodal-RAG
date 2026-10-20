@@ -204,6 +204,10 @@ class CareerMatcherService:
             bonus_score * 0.10
         )
 
+        # 硬技能覆盖率过低时，不允许用学历/项目泛化分把跨领域简历托到 MODERATE。
+        if jd_skills and skill_ratio < 0.34:
+            overall_score = min(overall_score, 45)
+
         match_level = "HIGHLY_MATCHED" if overall_score >= 85 else (
             "MATCHED" if overall_score >= 70 else (
                 "MODERATE" if overall_score >= 55 else "LOW"

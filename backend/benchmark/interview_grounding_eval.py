@@ -26,21 +26,36 @@ PASSWORD = os.getenv("E2E_PASSWORD", "Test@123456")
 KB_ID = "kb_real_resumes"
 OUT = Path(__file__).resolve().parent / "interview_grounding_eval.json"
 
+# 真实文件名不写进仓库；本地运行时用环境变量注入。
+RESUME_MAIN = os.getenv("E2E_RESUME_MAIN", "resume_main.pdf")
+RESUME_ALGO = os.getenv("E2E_RESUME_ALGO", "resume_algo.pdf")
+RESUME_BACKEND = os.getenv("E2E_RESUME_BACKEND", "resume_backend.pdf")
+RESUME_JAVA = os.getenv("E2E_RESUME_JAVA", "resume_java.pdf")
+
 CASES = [
-    ("G01", "辽宁大学_27届_张梦洋(4).pdf", "AI Agent / 后端研发工程师", "我在实习里做过 RAG 检索和后端服务，您可以挑一个项目点追问。"),
-    ("G02", "辽宁大学_27届_张梦洋(4).pdf", "大模型应用 / RAG 工程师", "我做过混合检索和重排，想请您追问检索链路的取舍。"),
-    ("G03", "宋浩简历(2).pdf", "RAG / 文档智能工程师", "我做过文档解析和检索，您可以追问项目细节。"),
-    ("G04", "宋浩简历(2).pdf", "数据平台 / 后端开发", "我做过数据链路和后端开发，请从简历里的项目继续问。"),
-    ("G05", "盛国梁 校招简历(2).pdf", "高并发后端工程师", "我做过大文件传输和秒杀场景，您可以追问并发与容错。"),
-    ("G06", "盛国梁 校招简历(2).pdf", "云原生 / SRE 工程师", "我做过服务部署和故障排查，请从项目经历继续问。"),
-    ("G07", "个人简历(2).pdf", "Java 后端工程师", "我做过 Java 后端和数据库相关项目，您可以追问实现细节。"),
-    ("G08", "个人简历(2).pdf", "数据库 / 后端开发", "我做过数据库设计和后端接口，请从简历项目继续追问。"),
-    ("G09", "辽宁大学_27届_张梦洋(4).pdf", "LLM 应用开发工程师", "我做过 Agent 状态机和 RAG，您可以追问工程落地。"),
-    ("G10", "宋浩简历(2).pdf", "多模态 / 文档解析工程师", "我做过文档处理和多模态解析，请从项目出发追问。"),
+    ("G01", RESUME_MAIN, "AI Agent / 后端研发工程师", "我在实习里做过 RAG 检索和后端服务，您可以挑一个项目点追问。"),
+    ("G02", RESUME_MAIN, "大模型应用 / RAG 工程师", "我做过混合检索和重排，想请您追问检索链路的取舍。"),
+    ("G03", RESUME_ALGO, "RAG / 文档智能工程师", "我做过文档解析和检索，您可以追问项目细节。"),
+    ("G04", RESUME_ALGO, "数据平台 / 后端开发", "我做过数据链路和后端开发，请从简历里的项目继续问。"),
+    ("G05", RESUME_BACKEND, "高并发后端工程师", "我做过大文件传输和秒杀场景，您可以追问并发与容错。"),
+    ("G06", RESUME_BACKEND, "云原生 / SRE 工程师", "我做过服务部署和故障排查，请从项目经历继续问。"),
+    ("G07", RESUME_JAVA, "Java 后端工程师", "我做过 Java 后端和数据库相关项目，您可以追问实现细节。"),
+    ("G08", RESUME_JAVA, "数据库 / 后端开发", "我做过数据库设计和后端接口，请从简历项目继续追问。"),
+    ("G09", RESUME_MAIN, "LLM 应用开发工程师", "我做过 Agent 状态机和 RAG，您可以追问工程落地。"),
+    ("G10", RESUME_ALGO, "多模态 / 文档解析工程师", "我做过文档处理和多模态解析，请从项目出发追问。"),
 ]
 
 
 def main() -> int:
+    if any(name.startswith("resume_") for name in (RESUME_MAIN, RESUME_ALGO, RESUME_BACKEND, RESUME_JAVA)):
+        print(
+            "请先在本地设置 E2E_RESUME_MAIN / E2E_RESUME_ALGO / "
+            "E2E_RESUME_BACKEND / E2E_RESUME_JAVA 为真实简历文件名；"
+            "真实文件名不要提交到 git。",
+            file=sys.stderr,
+        )
+        return 2
+
     with httpx.Client(base_url=BASE, timeout=90, trust_env=False) as client:
         login = client.post("/api/v1/auth/login", json={"student_id": STUDENT, "password": PASSWORD})
         if login.status_code != 200:

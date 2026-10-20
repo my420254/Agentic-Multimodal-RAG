@@ -2,7 +2,7 @@
 基于 LangGraph 的 Agent 工作流 (Cyclic Graph)
 """
 
-from typing import TypedDict, List, Annotated, Literal, Dict, Any
+from typing import TypedDict, List, Annotated, Literal, Dict, Any, Optional
 import operator
 import json
 
@@ -13,6 +13,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.graph.message import add_messages
 
 from app.services.llm import LLMService
+from app.services.prompt_registry import ResolvedPrompt, prompt_registry, trace_metadata
 from app.tools import search_knowledge_base
 from app.tools.governance import (
     ToolExecutionError,
@@ -125,6 +126,22 @@ class AgentWorkflow:
             )
         return self.llm_service
 
+    @staticmethod
+    def _llm_config(
+        config: RunnableConfig,
+        llm: LLMService,
+        prompt: Optional[ResolvedPrompt] = None,
+    ) -> RunnableConfig:
+        """把模型名和 prompt 版本写进 callback metadata。"""
+        cfg = dict(config or {})
+        metadata = dict(cfg.get("metadata") or {})
+        metadata.setdefault("ls_model_name", llm.model)
+        metadata.setdefault("ls_provider", "openai")
+        if prompt is not None:
+            metadata.update(trace_metadata(prompt))
+        cfg["metadata"] = metadata
+        return cfg
+
     async def analyze_intent(self, state: AgentState, config: RunnableConfig):
         """意图分析节点"""
         # 获取最新的一条 HumanMessage
@@ -145,18 +162,15 @@ class AgentWorkflow:
             }
 
         # LLM 意图判断
-        prompt = f"""Analyze the user input: "{content}"
-        
-Classify intent as:
-- "chat": Greeting, small talk, or general knowledge question that DOES NOT require external documentation.
-- "qa": Question that likely requires retrieving specific information from a knowledge base.
-
-Output ONLY one word: "chat" or "qa".
-"""
+        resolved = prompt_registry.resolve("agent.intent", content=content)
+        prompt = resolved.text
         try:
             llm = self._get_llm_service(state)
             # Use streaming=False to avoid "No generations found in stream" error with some local models
-            response = await llm.get_chat_model(temperature=0.01, streaming=False).ainvoke([HumanMessage(content=prompt)], config=config)
+            response = await llm.get_chat_model(temperature=0.01, streaming=False).ainvoke(
+                [HumanMessage(content=prompt)],
+                config=self._llm_config(config, llm, resolved),
+            )
             intent = response.content.strip().lower()
             if "qa" in intent or "knowledge" in intent:
                 intent = "qa"
@@ -184,30 +198,9 @@ Output ONLY one word: "chat" or "qa".
 
     async def agent_node(self, state: AgentState, config: RunnableConfig):
         """Agent 思考节点"""
-        # 准备 System Prompt
-        system_msg = SystemMessage(content=f"""你是一个专业的智能助手，专门用于帮助用户从知识库中检索和解答问题。
-
-你的工作流程如下：
-1. **分析意图**：仔细分析用户的问题，确定需要查询什么信息。
-2. **执行检索**：使用 `search_knowledge_base` 工具查询知识库。
-   - 只需提供 `query` 参数。系统会自动处理知识库 ID 和检索配置。
-   - 尽量使用准确的关键词。
-   - 如果用户的问题比较复杂，可以拆解为多次查询。
-3. **响应反馈**：
-   - 检索完成后，系统会评估检索结果的相关性。
-   - 如果系统提示 "检索结果相关性评分较低"，**你必须** 尝试改写查询关键词，并再次调用工具。
-   - 在重试时，如果之前的尝试没有结果，请尝试在参数中降低 `score_threshold` (例如 0.1) 以获取更多结果。
-   - 不要重复使用相同的查询。尝试不同的切入点。
-4. **生成回答**：
-   - 当检索结果被系统接受，或者系统提示 "已达到最大重试次数" 时，请基于现有的所有搜索结果回答用户的问题。
-   - 严谨引用来源，回答要准确、完整。
-   - 如果多次尝试后仍无结果，请诚实告知用户。
-
-注意事项：
-- 始终使用中文回答。
-- 优先使用工具获取信息，不要编造事实。
-- 在思考过程中，请明确输出你的决策逻辑 (例如 "Thinking: 收到重试提示，尝试改写关键词为...")。
-- **重要**：最终回答用户时，**不要**包含 "Thinking: ..." 这样的思考过程块。只输出最终的回答内容。思考过程仅用于中间步骤。""")
+        # 准备 System Prompt（Langfuse production label；失败回退代码默认值）
+        resolved = prompt_registry.resolve("agent.system")
+        system_msg = SystemMessage(content=resolved.text)
         
         messages = state["messages"]
         invocation_messages = [system_msg] + messages
@@ -216,7 +209,10 @@ Output ONLY one word: "chat" or "qa".
         # Use streaming=False to prevent crashes on local models
         model = llm.get_chat_model(streaming=False).bind_tools(self.tools)
         
-        response = await model.ainvoke(invocation_messages, config=config)
+        response = await model.ainvoke(
+            invocation_messages,
+            config=self._llm_config(config, llm, resolved),
+        )
         
         # 处理 Thinking 块：将其从 content 中剥离，放入 agent_steps
         import re
@@ -462,25 +458,18 @@ Output ONLY one word: "chat" or "qa".
             query = state.get("original_query", "")
             context = state.get("rag_context", "")
             
-            prompt = f"""你是一个严格的文档质量与反思审查员。请对检索片段是否能有效解答用户问题进行评估。
-
-## 用户问题:
-{query}
-
-## 检索到的文档片段:
-{context[:2000]}... (已截断)
-
-## 你必须只输出一个 JSON 对象，格式如下：
-{{
-  "relevance_score": 0.0到1.0的浮点数,
-  "is_sufficient": true/false,
-  "missing_info": "如果不足，简要说明遗漏的要点；否则填空字符串",
-  "suggested_query": "如果不足，给出可尝试重新检索的更精准关键词；否则填空字符串"
-}}
-"""
+            resolved = prompt_registry.resolve(
+                "agent.grading",
+                query=query,
+                context=context[:2000],
+            )
+            prompt = resolved.text
             try:
                 llm = self._get_llm_service(state)
-                response = await llm.get_chat_model(temperature=0.1).ainvoke([HumanMessage(content=prompt)], config=config)
+                response = await llm.get_chat_model(temperature=0.1).ainvoke(
+                    [HumanMessage(content=prompt)],
+                    config=self._llm_config(config, llm, resolved),
+                )
                 raw_text = response.content.strip()
                 import json
                 import re
@@ -566,18 +555,14 @@ Output ONLY one word: "chat" or "qa".
             if name and name not in names:
                 names.append(str(name))
         source_hint = "、".join(names) if names else "无"
-        system_prompt = f"""你是一个严谨的知识库问答助手。
-规则：
-1. 只基于下面提供的检索上下文回答，不要编造上下文之外的事实；
-2. 如果上下文不足，明确说“现有资料不足以完整回答”，并说明缺什么；
-3. 尽量引用来源文件名；本次可用来源：{source_hint}；
-4. 使用中文，结构清晰，不要输出思考过程。"""
+        resolved = prompt_registry.resolve("agent.answer", source_hint=source_hint)
+        system_prompt = resolved.text
         llm = self._get_llm_service(state)
         model = llm.get_chat_model(streaming=True)
         response = await model.ainvoke([
             SystemMessage(content=system_prompt),
             HumanMessage(content=f"用户问题：{query}\n\n检索上下文：\n{context[:6000]}"),
-        ], config=config)
+        ], config=self._llm_config(config, llm, resolved))
         return {
             "messages": [response],
             "agent_steps": [{"step": "response", "content": "基于检索上下文生成最终回答"}],
@@ -585,7 +570,8 @@ Output ONLY one word: "chat" or "qa".
 
     async def generate_chat(self, state: AgentState, config: RunnableConfig):
         """闲聊生成节点"""
-        system_prompt = """你是一个智能问答助手。请根据你的训练知识，准确、完整、有条理地回答用户的问题。使用中文回答。"""
+        resolved = prompt_registry.resolve("agent.chat")
+        system_prompt = resolved.text
         
         # 闲聊不涉及 RAG，直接结束
         # 这里其实应该调用 LLM 生成一个回复，但根据旧逻辑，似乎是返回 prompt 让前端/外部流式调用？
@@ -596,7 +582,10 @@ Output ONLY one word: "chat" or "qa".
         llm = self._get_llm_service(state)
         # Use streaming=False to ensure compatibility
         model = llm.get_chat_model(streaming=False)
-        response = await model.ainvoke([SystemMessage(content=system_prompt)] + messages, config=config)
+        response = await model.ainvoke(
+            [SystemMessage(content=system_prompt)] + messages,
+            config=self._llm_config(config, llm, resolved),
+        )
         
         return {
             "messages": [response],

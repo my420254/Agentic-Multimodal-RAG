@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.config import get_settings
+from app.core.tracing import tracer
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -77,28 +78,39 @@ async def execute_with_governance(
     timeout_s = timeout_s if timeout_s is not None else settings.TOOL_TIMEOUT_SECONDS
     max_retries = max_retries if max_retries is not None else settings.TOOL_MAX_RETRIES
     last_error: Optional[Exception] = None
-    for attempt in range(max_retries + 1):
-        try:
-            result = await asyncio.wait_for(
-                tool.ainvoke(validated, config=config),
-                timeout=timeout_s,
-            )
-            return str(result)
-        except asyncio.TimeoutError as exc:
-            last_error = ToolTimeoutError(f"工具 {tool_name} 超时（{timeout_s}s）")
-            if attempt < max_retries:
-                await asyncio.sleep(0.2 * (attempt + 1))
-                continue
-            raise last_error from exc
-        except ToolValidationError:
-            raise
-        except Exception as exc:
-            last_error = ToolExecutionError(str(exc))
-            if attempt < max_retries:
-                await asyncio.sleep(0.2 * (attempt + 1))
-                continue
-            raise last_error from exc
-    raise last_error or ToolExecutionError("工具执行失败")
+    with tracer.observation(
+        f"tool.governance.{tool_name}",
+        as_type="tool",
+        input=validated,
+        metadata={"timeout_s": timeout_s, "max_retries": max_retries},
+    ) as span:
+        for attempt in range(max_retries + 1):
+            try:
+                result = await asyncio.wait_for(
+                    tool.ainvoke(validated, config=config),
+                    timeout=timeout_s,
+                )
+                tracer.update(span, output=str(result)[:4000])
+                return str(result)
+            except asyncio.TimeoutError as exc:
+                last_error = ToolTimeoutError(f"工具 {tool_name} 超时（{timeout_s}s）")
+                if attempt < max_retries:
+                    await asyncio.sleep(0.2 * (attempt + 1))
+                    continue
+                tracer.update(span, status_message=str(last_error))
+                raise last_error from exc
+            except ToolValidationError as exc:
+                tracer.update(span, status_message=str(exc))
+                raise
+            except Exception as exc:
+                last_error = ToolExecutionError(str(exc))
+                if attempt < max_retries:
+                    await asyncio.sleep(0.2 * (attempt + 1))
+                    continue
+                tracer.update(span, status_message=str(last_error))
+                raise last_error from exc
+        tracer.update(span, status_message=str(last_error or "tool execution failed"))
+        raise last_error or ToolExecutionError("工具执行失败")
 
 
 def error_payload(error_type: str, message: str, retryable: bool) -> str:
